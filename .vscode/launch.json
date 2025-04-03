@@ -1,0 +1,15 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Python: Debug with Config File",
+        "type": "python",
+        "request": "launch",
+        "program": "${workspaceFolder}/run/run-optimization.py",
+        "args": ["${workspaceFolder}/run/heisenberg/configs/config.yml"],
+        "cwd": "${workspaceFolder}/run",
+        "console": "integratedTerminal"
+      }
+    ]
+  }
+  
