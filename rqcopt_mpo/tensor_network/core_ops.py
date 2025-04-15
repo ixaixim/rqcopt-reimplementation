@@ -1,0 +1,571 @@
+import jax.numpy as jnp
+import numpy as np # Used for np.prod
+from scipy.linalg import rq # RQ decomposition is readily available in SciPy # NOTE: this cannot be accelerated with jax (we formulate an alternative suggestion when using this function.)
+from rqcopt_mpo.core_objects import GateLayer, Gate
+from rqcopt_mpo.mpo.mpo_dataclass import MPO
+from typing import Tuple, Optional, Dict, List
+
+def canonicalize_local_tensor(
+    tensor: jnp.ndarray,
+    mode: str
+) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    """
+    Canonicalizes a single MPO tensor using QR or RQ decomposition.
+
+    Assumes the input tensor has shape (left_bond, phys_out, phys_in, right_bond).
+
+    - If mode is 'left', performs QR decomposition (T = QR). The resulting Q
+      tensor is left-canonical. Returns Q (reshaped) and R. R should be
+      absorbed into the tensor to the right.
+    - If mode is 'right', performs RQ decomposition (T = RQ). The resulting Q
+      tensor is right-canonical. Returns Q (reshaped) and R. R should be
+      absorbed into the tensor to the left.
+
+    Args:
+        tensor: The 4D MPO tensor to canonicalize.
+        mode: The canonicalization mode ('left' or 'right').
+
+    Returns:
+        A tuple containing:
+        - canonical_tensor (jnp.ndarray): The orthogonal factor (Q), reshaped
+            to have 4 indices, with one virtual bond dimension potentially changed.
+        - factor_matrix (jnp.ndarray): The factor (R) to be absorbed into the
+            neighboring tensor. Shape depends on the mode:
+            - 'left' mode: R has shape (new_right_bond, old_right_bond)
+            - 'right' mode: R has shape (old_left_bond, new_left_bond)
+
+    Raises:
+        ValueError: If the input tensor is not 4D or if the mode is invalid.
+
+                                                                                                                     
+          Example of 'right' canonicalization:                                                                   
+                                                                                                                 
+                                                                                                                 
+                                                                                                                 
+                                                     | phys_out                               | phys_out         
+                                                     |                                        |                  
+ left_bond           new_left_bond                   |                                        |                  
+           +--------+              new_left_bond +--------+   right_bond        left_bond +--------+   right_bond
+           |        |                            |        |                               |        |             
+   --------|   R    |--------            --------|   Q    |--------   <------     --------|        |--------     
+           |        |                            |        |                               |        |             
+           +--------+                            +--------+                               +--------+             
+                                                     |                                        |                  
+                                                     | phys_in                                | phys_in          
+                                                     |                                        |                  
+    """
+    if len(tensor.shape) != 4:
+        raise ValueError(f"Input tensor must be 4D (l, po, pi, r), got shape {tensor.shape}")
+
+    original_shape = tensor.shape
+    l_dim, po_dim, pi_dim, r_dim = original_shape
+
+    if mode == 'left':
+        # --- Left Canonicalization (QR) ---
+        # Reshape T into a matrix M: Combine (l, po, pi) dims for rows, keep r for columns.
+        # Target shape for M: (l*po*pi, r)
+        matrix_to_decompose = tensor.reshape((l_dim * po_dim * pi_dim, r_dim))
+
+        # Perform QR decomposition: M = Q @ R
+        # Q will have shape (l*po*pi, new_r), R will have shape (new_r, r)
+        Q, R_factor = jnp.linalg.qr(matrix_to_decompose, mode='reduced')
+
+        # Reshape Q back into a 4D tensor: (l, po, pi, new_r)
+        new_r_dim = Q.shape[-1]
+        canonical_tensor = Q.reshape((l_dim, po_dim, pi_dim, new_r_dim))
+
+        # R_factor is the matrix to be absorbed by the right neighbor
+        factor_matrix = R_factor
+
+    elif mode == 'right':
+        # --- Right Canonicalization (RQ) ---
+        # Reshape T into a matrix M: Keep l for rows, combine (po, pi, r) for columns.
+        # Target shape for M: (l, po*pi*r)
+        matrix_to_decompose = tensor.reshape((l_dim, po_dim * pi_dim * r_dim))
+
+        # Perform RQ decomposition using SciPy's rq: M = R @ Q
+        # R will have shape (l, new_l), Q will have shape (new_l, po*pi*r)
+        # Note: rq returns R, Q
+        # Convert matrix to numpy temporarily as scipy.linalg.rq expects numpy arrays
+        # If extreme performance is needed and SciPy dependency is undesired, you could implement RQ using QR on the transpose, but scipy.linalg.rq is convenient.
+        R_factor, Q = rq(np.asarray(matrix_to_decompose), mode='economic')
+
+        # Convert results back to JAX arrays
+        R_factor = jnp.asarray(R_factor)
+        Q = jnp.asarray(Q)
+
+        # Reshape Q back into a 4D tensor: (new_l, po, pi, r)
+        new_l_dim = Q.shape[0]
+        canonical_tensor = Q.reshape((new_l_dim, po_dim, pi_dim, r_dim))
+
+        # R_factor is the matrix to be absorbed by the left neighbor
+        factor_matrix = R_factor
+
+    else:
+        raise ValueError(f"Invalid mode '{mode}'. Choose 'left' or 'right'.")
+
+    return canonical_tensor, factor_matrix
+
+def merge_two_mpos_and_gate(
+    mpo1: jnp.ndarray,
+    mpo2: jnp.ndarray,
+    gate: jnp.ndarray,
+    gate_on_left: bool = True
+) -> jnp.ndarray:
+    """
+    Merges two adjacent MPO tensors with a two-qubit gate tensor.
+
+    Contracts the network formed by mpo1 -- mpo2 with the gate V acting
+    across their physical indices. This is a fundamental step in contracting
+    a circuit layer with an MPO representation (like U_ref or an environment).
+
+    Args:
+        mpo1: Left MPO tensor. Expected shape (l1, p1_out, p1_in, r1).
+        mpo2: Right MPO tensor. Expected shape (r1, p2_out, p2_in, r2).
+              The bond dimension r1 must match mpo1's right bond.
+        gate: Two-qubit gate tensor. Expected shape (p1', p2', p1'', p2'').
+              The specific physical dimension interpretation (which index is in/out)
+              depends on the 'gate_on_left' flag and the context (see below).
+              Typically assumes (p_out1, p_out2, p_in1, p_in2) or compatible. Out = upper index, In = lower index.
+        gate_on_left: Controls the contraction pattern.
+            - If True: Assumes the gate tensor `gate` logically applies *before*
+              (or below in diagrams) the MPO tensors `mpo1` and `mpo2`.
+              The gate's output legs connect to the `p_in` legs of the MPOs.
+              Pattern typically used when building the E_top environment.
+              Einsum path: 'iabc, cdef, begh -> iadghf'
+              (where 'begh' represents the gate tensor).
+              Result indices: (l1, p1_out, p2_out, gate_p1_in, gate_p2_in, r2)
+            - If False: Assumes the gate tensor `gate` logically applies *after*
+              (or above in diagrams) the MPO tensors `mpo1` and `mpo2`.
+              The gate's input legs connect to the `p_out` legs of the MPOs.
+              This pattern is typically used when building the E_bottom environment.
+              Einsum path: 'abcd, icef, fdgh -> iabegh'
+              (where 'abcd' represents the gate tensor).
+              Result indices: (l1, gate_p1_in, gate_p2_in, p1_in, p2_in, r2)
+
+    Returns:
+        The resulting merged tensor with 6 indices. The specific index order
+        and meaning depends on the 'gate_on_left' flag. This tensor typically
+        needs to be split back into two MPO tensors (e.g., using SVD).
+
+    Raises:
+        ValueError: If input tensor dimensions or shapes are incompatible.
+
+                                                            
+      if gate_is_left == True (i.e. two-qubit gate is below)
+                                                            
+                                                                                      
+          | p1_out          | p2_out                                                  
+          |                 |                                                         
+ l1     +----+  r1    r1  +----+     r2                       p1_out      p2_out      
+   -----|mpo1|-----  -----|mpo2|-----                            |         |          
+        +----+            +----+                                 |         |          
+          |                 |                               +-------------------+     
+          | p1_in           | p2_in                    l1   |                   |  r2 
+                                       ---------->     -----|                   |-----
+          | gp_out1         | gp_out2                       |                   |     
+          |                 |                               +-------------------+     
+        +----------------------+                                 |         |          
+        |        gate          |                                 |         |          
+        +----------------------+                              gp_in1      gp_in2      
+          |                 |                                                         
+          | gp_in1          | gp_in2                                                  
+                                                                                      
+    """
+    # --- Input Validation ---
+    if len(mpo1.shape) != 4 or len(mpo2.shape) != 4:
+        raise ValueError(f"MPO tensors must be 4D. Got shapes {mpo1.shape} and {mpo2.shape}.")
+    if mpo1.shape[-1] != mpo2.shape[0]:
+        raise ValueError(f"Bond dimension mismatch between mpo1 right bond ({mpo1.shape[-1]}) "
+                         f"and mpo2 left bond ({mpo2.shape[0]}).")
+    if len(gate.shape) != 4:
+        raise ValueError(f"Gate tensor must be 4D. Got shape {gate.shape}.")
+
+    # Infer expected physical dimension (assuming square, e.g., 2 for qubits)
+    phys_dim = mpo1.shape[1] # Assume p1_out = p1_in = p2_out = p2_in
+    if (mpo1.shape[1] != mpo1.shape[2] or mpo2.shape[1] != mpo2.shape[2] or
+            mpo1.shape[1] != mpo2.shape[1] or mpo1.shape[1] != gate.shape[0] or
+            mpo1.shape[1] != gate.shape[1] or mpo1.shape[1] != gate.shape[2] or
+            mpo1.shape[1] != gate.shape[3]):
+        print(f"Warning: Physical dimensions seem inconsistent. "
+              f"mpo1: {mpo1.shape}, mpo2: {mpo2.shape}, gate: {gate.shape}. Assuming dimension {phys_dim}.")
+        # You might add stricter checks here depending on expected gate/MPO structure
+
+    # --- Contraction ---
+    try:
+        if gate_on_left: # i.e. if layer is below
+            # Path: 'iabc, cdef, begh -> iadghf'
+            # mpo1: i a b c (l1, p1_out, p1_in, r1)
+            # mpo2: c d e f (r1, p2_out, p2_in, r2)
+            # gate: b e g h (gate_p1_out=p1_in, gate_p2_out=p2_in, gate_p1_in, gate_p2_in)
+            # Result: i a d g h f (l1, p1_out, p2_out, g_p1_in, g_p2_in, r2)
+            # Check physical dimensions compatibility
+            if gate.shape[0] != mpo1.shape[2] or gate.shape[1] != mpo2.shape[2]:
+                 raise ValueError(f"Physical dimension mismatch for gate_on_left=True. "
+                                  f"Gate output dims ({gate.shape[0]},{gate.shape[1]}) vs "
+                                  f"MPO p_in dims ({mpo1.shape[2]},{mpo2.shape[2]}).")
+
+            merged_tensor = jnp.einsum('iabc, cdef, begh -> iadghf', mpo1, mpo2, gate, optimize='optimal')
+
+        else: # gate_on_left is False
+            # Path: 'abcd, icef, fdgh -> iabegh'
+            # gate: a b c d (gate_p1_out, gate_p2_out, gate_p1_in=p1_out, gate_p2_in=p2_out)
+            # mpo1: i c e f (l1, p1_out, p1_in, r1)
+            # mpo2: f d g h (r1, p2_out, p2_in, r2)
+            # Result: i a b e g h (l1, g_p1_out, g_p2_out, p1_in, p2_in, r2)
+             # Check physical dimensions compatibility
+            if gate.shape[2] != mpo1.shape[1] or gate.shape[3] != mpo2.shape[1]:
+                 raise ValueError(f"Physical dimension mismatch for gate_on_left=False. "
+                                  f"Gate input dims ({gate.shape[2]},{gate.shape[3]}) vs "
+                                  f"MPO p_out dims ({mpo1.shape[1]},{mpo2.shape[1]}).")
+
+            merged_tensor = jnp.einsum('abcd, icef, fdgh -> iabegh', gate, mpo1, mpo2, optimize='optimal')
+
+    except Exception as e:
+        print("Error during einsum contraction:")
+        print(f"  gate_on_left: {gate_on_left}")
+        print(f"  mpo1 shape: {mpo1.shape}")
+        print(f"  mpo2 shape: {mpo2.shape}")
+        print(f"  gate shape: {gate.shape}")
+        raise e # Re-raise the exception
+
+    return merged_tensor
+
+def compress_SVD(
+    u: jnp.ndarray,
+    s: jnp.ndarray,
+    vh: jnp.ndarray,
+    max_bondim: Optional[int] = None,
+    cutoff: float = 1e-12
+) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, int]:
+    """
+    Truncates SVD results based on maximum bond dimension and/or cutoff.
+
+    Args:
+        u: Left singular vectors.
+        s: Singular values (1D array, sorted descending).
+        vh: Right singular vectors (vh = v.conj().T).
+        max_bondim: The maximum number of singular values to keep.
+                    If None, determined by cutoff.
+        cutoff: Singular values below this threshold (relative to the largest)
+                are discarded.
+
+    Returns:
+        A tuple containing:
+        - u_trunc: Truncated left singular vectors.
+        - s_trunc: Truncated singular values.
+        - vh_trunc: Truncated right singular vectors.
+        - k_trunc: The number of singular values kept.
+    """
+    if s.size == 0: # Handle empty singular values case
+        return u, s, vh, 0
+        
+    # Determine truncation based on cutoff
+    k_cutoff = jnp.sum(s / s[0] > cutoff)
+
+    # Determine truncation based on max_bondim
+    if max_bondim is None:
+        k_bondim = s.size
+    else:
+        k_bondim = min(int(max_bondim), s.size) # Ensure max_bondim <= rank
+
+    # Final truncation dimension
+    k_trunc = min(k_cutoff, k_bondim)
+
+    # Truncate
+    u_trunc = u[:, :k_trunc]
+    s_trunc = s[:k_trunc]
+    vh_trunc = vh[:k_trunc, :]
+
+    return u_trunc, s_trunc, vh_trunc, k_trunc
+
+def split_tensor_into_half_canonical_mpo_pair(
+    merged_tensor: jnp.ndarray,
+    canonical_mode: str = 'left',
+    max_bondim: Optional[int] = None,
+    svd_cutoff: float = 1e-12
+) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    """
+    Splits a 6-index merged tensor (from merge_two_mpos_and_gate)
+    into two 4-index MPO tensors using SVD, creating a half-canonical pair.
+
+    The merged tensor is assumed to have indices corresponding to:
+    (left_virt, phys1_out, phys2_out, phys1_in, phys2_in, right_virt)
+    where (phys1_out, phys1_in) are the physical indices associated with the
+    first resulting MPO tensor, and (phys2_out, phys2_in) with the second.
+
+    Args:
+        merged_tensor: The 6-index tensor output from merging two MPOs and a gate.
+        canonical_mode: Specifies which output tensor should be canonical.
+            - 'left': The left output tensor (mpo1) will be left-canonical (orthogonal).
+            - 'right': The right output tensor (mpo2) will be right-canonical (orthogonal).
+        max_bondim: Maximum virtual bond dimension allowed for the new bond
+                    connecting the two output tensors. Defaults to None (no limit).
+        svd_cutoff: Cutoff threshold for truncating singular values during SVD.
+
+    Returns:
+        A tuple containing:
+        - mpo1: The left MPO tensor (shape: left_virt, phys1_out, phys1_in, new_virt).
+        - mpo2: The right MPO tensor (shape: new_virt, phys2_out, phys2_in, right_virt).
+
+    Raises:
+        ValueError: If the input tensor is not 6D or if canonical_mode is invalid.
+                                                                                                                              
+                                                                     Note: depending on canonical mode: left or right mpo are 
+                       p1_out      p2_out                                  respectively left or right canonicalized           
+                          |         |                                                                                         
+                          |         |                                    | p1_out          | p2_out                           
+                     +-------------------+                               |                 |                                  
+                l1   |                   |  r2                  l1     +----+  r1    r1  +----+     r2                        
+                -----|                   |-----   ---------->     -----|mpo1|-----  -----|mpo2|-----                          
+                     |                   |                             +----+            +----+                               
+                     +-------------------+                               |                 |                                  
+                          |         |                                    | p1_in           | p2_in                            
+                          |         |                                                                                         
+                       gp_in1      gp_in2                                                                                 
+    """
+    if len(merged_tensor.shape) != 6:
+        raise ValueError(f"Input merged_tensor must be 6D, got shape {merged_tensor.shape}")
+
+    original_shape = merged_tensor.shape
+    l_dim = original_shape[0]
+    p1o_dim, p2o_dim = original_shape[1], original_shape[2]
+    p1i_dim, p2i_dim = original_shape[3], original_shape[4]
+    r_dim = original_shape[5]
+
+    # --- Transpose and Reshape for SVD ---
+    # Group indices for the left tensor (rows): (l, p1o, p1i) -> indices (0, 1, 3)
+    # Group indices for the right tensor (columns): (p2o, p2i, r) -> indices (2, 4, 5)
+    # Permute axes from (0, 1, 2, 3, 4, 5) to (0, 1, 3, 2, 4, 5)
+    permuted_tensor = jnp.transpose(merged_tensor, axes=(0, 1, 3, 2, 4, 5))
+
+    # Reshape into matrix: rows = l*p1o*p1i, cols = p2o*p2i*r
+    rows_dim = l_dim * p1o_dim * p1i_dim
+    cols_dim = p2o_dim * p2i_dim * r_dim
+    matrix_to_decompose = permuted_tensor.reshape((rows_dim, cols_dim))
+
+    # --- Perform SVD ---
+    try:
+        U, S, Vh = jnp.linalg.svd(matrix_to_decompose, full_matrices=False)
+    except Exception as e:
+         print(f"SVD failed on matrix of shape {matrix_to_decompose.shape}")
+         raise e
+
+    # --- Truncate (Compress) ---
+    U_trunc, S_trunc, Vh_trunc, k_trunc = compress_SVD(U, S, Vh, max_bondim, svd_cutoff)
+
+    if k_trunc == 0:
+        print("Warning: SVD resulted in zero bond dimension after truncation.")
+        new_bond_dim = 1 # Keep bond dim 1 for consistency
+        mpo1 = jnp.zeros((l_dim, p1o_dim, p1i_dim, new_bond_dim), dtype=merged_tensor.dtype)
+        mpo2 = jnp.zeros((new_bond_dim, p2o_dim, p2i_dim, r_dim), dtype=merged_tensor.dtype)
+        # Optionally, return identity matrices scaled by zero?
+        return mpo1, mpo2
+
+    # --- Form Half-Canonical Pair and Reshape Back ---
+    new_bond_dim = k_trunc
+    S_mat = jnp.diag(S_trunc) # Convert 1D S_trunc to diagonal matrix
+
+    if canonical_mode == 'left':
+        # mpo1 = U (left canonical)
+        # mpo2 = S @ Vh (absorbs singular values)
+        mpo1_matrix = U_trunc
+        mpo2_matrix = S_mat @ Vh_trunc
+
+        # Reshape mpo1_matrix (rows_dim, k) back to tensor (l, p1o, p1i, k)
+        mpo1 = mpo1_matrix.reshape((l_dim, p1o_dim, p1i_dim, new_bond_dim))
+
+        # Reshape mpo2_matrix (k, cols_dim) back to tensor (k, p2o, p2i, r)
+        mpo2 = mpo2_matrix.reshape((new_bond_dim, p2o_dim, p2i_dim, r_dim))
+
+    elif canonical_mode == 'right':
+        # mpo1 = U @ S (absorbs singular values)
+        # mpo2 = Vh (right canonical)
+        mpo1_matrix = U_trunc @ S_mat
+        mpo2_matrix = Vh_trunc
+
+        # Reshape mpo1_matrix (rows_dim, k) back to tensor (l, p1o, p1i, k)
+        mpo1 = mpo1_matrix.reshape((l_dim, p1o_dim, p1i_dim, new_bond_dim))
+
+        # Reshape mpo2_matrix (k, cols_dim) back to tensor (k, p2o, p2i, r)
+        mpo2 = mpo2_matrix.reshape((new_bond_dim, p2o_dim, p2i_dim, r_dim))
+
+    else:
+        raise ValueError(f"Invalid canonical_mode '{canonical_mode}'. Choose 'left' or 'right'.")
+
+    return mpo1, mpo2
+
+def contract_mpo_with_layer_right_to_left(
+    mpo_init: MPO,
+    layer: GateLayer,
+    layer_is_below: bool,
+    max_bondim: Optional[int] = None,
+    svd_cutoff: float = 1e-12
+) -> MPO:
+    """
+    Contracts an MPO with a circuit layer from right to left. (Corrected R absorption)
+
+    Handles both 1-qubit and 2-qubit gates within the layer. Uses RQ
+    decomposition for single sites and SVD + RQ for two-qubit gate merges
+    to maintain right-canonical form during the sweep.
+
+    Args:
+        mpo_init: The initial MPO object.
+        layer: The GateLayer object containing gates to contract.
+        layer_is_below: True if the gate layer is logically below the MPO
+                       (contracts with MPO's p_in), False if above
+                       (contracts with MPO's p_out).
+        max_bondim: Maximum bond dimension for SVD truncation.
+        svd_cutoff: Cutoff for SVD truncation.
+
+    Returns:
+        A new MPO object representing the contracted result. This MPO
+        will be approximately right-canonical.
+    """
+    n_sites = mpo_init.n_sites
+    if n_sites == 0:
+        return MPO(tensors=[])
+
+    initial_tensors = mpo_init.tensors
+    dtype = initial_tensors[0].dtype
+
+    # --- Prepare Gate Lookup ---
+    # Initialize with None since at most one gate (or no gate) acts on each qubit.
+    gate_map: Dict[int, Optional[Gate]] = {i: None for i in range(n_sites)}
+
+    for gate in layer.gates:
+        rightmost_site = max(gate.qubits)  # two-qubit gates will be assigned to the higher index
+        if rightmost_site < n_sites:
+            if gate_map[rightmost_site] is not None:
+                # Optionally warn if there's already a gate assigned here.
+                print(f"Warning: Overwriting gate on site {rightmost_site} with gate {gate.name}.")
+            gate_map[rightmost_site] = gate
+        else:
+            print(f"Warning: Gate {gate.name} acts on qubits {gate.qubits} outside MPO range (0-{n_sites-1}). Skipping.")
+
+    # --- Right-to-Left Sweep ---
+    mpo_res_tensors: List[jnp.ndarray] = [None] * n_sites
+    # R_factor: shape (old_right_bond_dim, new_right_bond_dim) from perspective of mpo_i
+    right_bond_dim = initial_tensors[-1].shape[-1]
+    R_to_carry_left = jnp.eye(right_bond_dim, dtype=dtype)
+
+    i = n_sites - 1
+    while i >= 0:
+        # Retrieve the gate (or None if no gate acts on site i)
+        gate_acting_here = gate_map.get(i)
+        gate_1q = None
+        gate_2q = None
+
+        # Only proceed if a gate is found at this site
+        if gate_acting_here is not None:
+            if gate_acting_here.is_two_qubit():
+                # For a valid two-qubit gate, the gate should act on (i-1, i)
+                if i > 0 and tuple(sorted(gate_acting_here.qubits)) == (i - 1, i):
+                    gate_2q = gate_acting_here
+                else:
+                    print("Warning: Two-qubit gate found with unexpected qubit ordering.")
+            elif gate_acting_here.is_single_qubit() and gate_acting_here.qubits == (i,):
+                gate_1q = gate_acting_here
+
+        # --- Process Site(s) ---
+        if gate_2q is not None:
+            # --- Two-Qubit Gate Case ---
+            if i == 0: raise RuntimeError("2Q gate logic error at site i=0.")
+
+            mpo_i = initial_tensors[i]
+            mpo_im1 = initial_tensors[i - 1]
+
+            # 1. Absorb R factor into mpo_i (**CORRECTED EINSUM**)
+            #  mpo_i shape (l,p,p,r). R_factor shape (r, new_r). Contract 'r'.
+            # Output shape (l,p,p,new_r)
+            mpo_i_prime = jnp.einsum('iabj, jk -> iabk', mpo_i, R_to_carry_left, optimize='optimal')
+
+            # 2. Merge MPOs and the Gate
+            merged_T = merge_two_mpos_and_gate(mpo_im1, mpo_i_prime, gate_2q.tensor_4d, gate_on_left=layer_is_below)
+
+            # 3. Split back using SVD (right part canonical)
+            mpo_im1_temp, mpo_i_final = split_tensor_into_half_canonical_mpo_pair(
+                merged_T, canonical_mode='right', max_bondim=max_bondim, svd_cutoff=svd_cutoff
+            )
+            # TODO: need to assign mpo_i_final to mpo_res_tensors[i]
+           # 5. Process the left part (mpo_im1_temp)
+            if i - 1 == 0:
+                # This is the leftmost tensor, do NOT canonicalize. It absorbed the final R implicitly during split.
+                print(f"    Storing final tensor for site 0 (shape {mpo_im1_temp.shape}) without canonicalization.")
+                mpo_res_tensors[i - 1] = mpo_im1_temp
+                R_to_carry_left = None # No more R factor needed
+            else:
+                # Canonicalize the left part to get final tensor and NEW R factor
+                mpo_im1_final, R_new = canonicalize_local_tensor(mpo_im1_temp, mode='right')
+
+                mpo_res_tensors[i - 1] = mpo_im1_final
+                R_to_carry_left = R_new
+            
+            mpo_res_tensors[i] = mpo_i_final
+
+            # 6. Update R factor and decrement loop counter
+            R_to_carry_left = R_new
+            i -= 2
+
+        else:
+            # --- Single-Qubit Gate or No Gate Case ---
+            current_tensor = initial_tensors[i]
+
+            # 1. Absorb R factor (**CORRECTED EINSUM**)
+            # R_factor shape (r, new_r). current_tensor shape (l,p,p,r). Contract 'r'.
+            # Output shape (l,p,p,new_r)
+            tensor_after_absorb = jnp.einsum('iabj, jk -> iabk', current_tensor, R_to_carry_left, optimize='optimal')
+
+            # 2. Apply 1Q gate if present
+            tensor_after_gate = tensor_after_absorb # Default if no gate
+            if gate_1q is not None:
+                gate_tensor = gate_1q.tensor_4d
+                if gate_tensor.shape == (2, 2):
+                    if layer_is_below: # Gate acts on p_in (index 2)
+                        tensor_after_gate = jnp.einsum('iabk, bc -> iack', tensor_after_absorb, gate_tensor, optimize='optimal')
+                    else: # Gate acts on p_out (index 1)
+                        tensor_after_gate = jnp.einsum('ab, ibck -> iack', gate_tensor, tensor_after_absorb, optimize='optimal')
+                else:
+                     print(f"Warning: Skipping 1Q gate {gate_1q.name} on site {i} due to non-2x2 shape {gate_tensor.shape}.")
+
+            
+            # 3. Canonicalize or Store Final Tensor
+            if i == 0:
+                # This is the leftmost tensor, do NOT canonicalize.
+                 # print(f"    Storing final tensor for site 0 (shape {tensor_after_gate.shape}) without canonicalization.")
+                mpo_res_tensors[i] = tensor_after_gate
+                R_to_carry_left = None # No more R factor needed
+            else:
+                # Canonicalize the result -> get final tensor and NEW R factor
+                Q_final, R_new = canonicalize_local_tensor(tensor_after_gate, mode='right')
+                mpo_res_tensors[i] = Q_final
+                R_to_carry_left = R_new
+
+            # 4. Decrement loop counter
+            i -= 1
+
+     # NOTE: Cannot handle n_sites=1 case.Add error if n_sites<2. 
+    
+    # --- Final Check and MPO Creation ---
+    if any(t is None for t in mpo_res_tensors):
+         missing_indices = [idx for idx, t in enumerate(mpo_res_tensors) if t is None]
+         raise RuntimeError(f"MPO contraction resulted in None tensors at indices: {missing_indices}. Check loop logic.")
+    # NOTE: I think I need to invert the indices of the mpo_res_tensors
+
+    final_mpo = MPO(tensors=mpo_res_tensors)
+    # Mark as only partially canonical
+    final_mpo.is_right_canonical = False # Since site 0 is not canonical
+
+    return final_mpo
+
+# def contract_mpo_with_layer(mpo: List[jnp.ndarray], layer: GateLayer, direction: str, max_bondim: int, layer_is_below: bool, **kwargs) -> List[jnp.ndarray]:
+#     pass
+
+# def compute_layer_left_environment(E_top: List[jnp.ndarray], E_bottom: List[jnp.ndarray], layer: GateLayer, gate_index: int) -> jnp.ndarray:
+#     pass
+
+# def compute_layer_right_environment(E_top: List[jnp.ndarray], E_bottom: List[jnp.ndarray], layer: GateLayer, gate_index: int) -> jnp.ndarray
+#     pass
+
+# def contract_circuit_mpo(circuit: Circuit, mpo: MPO, max_bondim: int) -> MPO:
+#     pass

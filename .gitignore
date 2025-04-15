@@ -169,3 +169,8 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# results
+run/heisenberg/results/
+run/heisenberg/model_list.txt
+scratchpad.txt

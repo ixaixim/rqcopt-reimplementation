@@ -13,11 +13,14 @@ from rqcopt_mpo.save_model import (save_optimized_model, remove_blank_lines,
 # from rqcopt_mpo.spin_systems import construct_ising_hamiltonian, construct_heisenberg_hamiltonian
 from rqcopt_mpo.spin_systems import construct_heisenberg_hamiltonian
 # from rqcopt_mpo.fermionic_systems import load_molecular_model
-from rqcopt_mpo.brickwall_circuit import get_nlayers, get_initial_gates
+from rqcopt_mpo.brickwall_circuit import get_nlayers, get_initial_gates, get_gates_per_layer, get_circuit_structure_weyl_layered
 from rqcopt_mpo.brickwall_opt import optimize_swap_network_circuit_RieADAM
 from rqcopt_mpo.tn_helpers import left_to_right_QR_sweep
 
 from helpers import periodic_clear, get_duration, get_memory_usage
+
+# for tests
+from rqcopt_mpo.mpo.mpo_dataclass import MPO
 
 
 def molecular_dynamics_opt(config, Vlist_start, U_ref):
@@ -32,6 +35,17 @@ def molecular_dynamics_opt(config, Vlist_start, U_ref):
 
     # Save optimization results
     _ = save_optimized_model(config, U_ref, Vlist, err_iter, config['ref_nbr'])
+
+def run_optimization(circuit, MPO, config):
+    # canonicalize U_ref MPO if not done yet
+    if not MPO.is_left_canonical:
+        MPO.left_canonicalize()
+
+    # optimizer run
+    # local_svd_gate_updater()
+    # get time 
+    # save optimized model
+    pass
 
 
 def set_up_model(config, path):
@@ -90,6 +104,11 @@ def main():
     print('System with ... \n\t*{} Hamiltonian \n\t*n_sites = {}\n\t*degree = {} \n\t*n_repetitions = {}\n\t*n_id_layers={}'.format(
         config['hamiltonian'], config['n_sites'], config['degree'], config['n_repetitions'], config['n_id_layers']))
 
+    hamiltonian = config['hamiltonian']
+    n_sites = config['n_sites']
+    n_repetitions = config['n_repetitions']
+    degree = config['degree']
+    n_id_layers = config['n_id_layers']
 
     # Load the references and obtain initial Trotter gates; use negative coefficients for adjoint reference
     if config['hamiltonian'] in ['molecular', 'fermi-hubbard-1d']:
@@ -127,6 +146,21 @@ def main():
     n_orbitals_ = None 
     # n_orbitals_ = None if config['hamiltonian'] in ['fermi-hubbard-1d', 'ising-1d', 'heisenberg'] else n_orbitals
     n_layers = get_nlayers(config['degree'], config['n_repetitions'], n_orbitals=n_orbitals_, hamiltonian=config['hamiltonian'])
+
+    raw_gates_per_layer, layer_is_odd = get_gates_per_layer(Vlist_start, n_sites, degree=degree, n_repetitions=n_repetitions, n_layers=n_layers, n_id_layers=n_id_layers, hamiltonian=hamiltonian)
+
+    circuit = get_circuit_structure_weyl_layered(n_sites, raw_gates_per_layer, layer_is_odd, hamiltonian)
+    circuit.absorb_single_qubit_gates()
+    # circuit.absorb_single_qubit_gates()
+    # print()
+    # circuit.print_gates()
+    # perform tests various tests (check only if running)
+    mpo = MPO(tensors=U_ref, is_left_canonical=0, is_right_canonical=0)
+    # mpo.left_canonicalize()
+
+    # run_optimization(config, circuit, MPO)
+
+
     print('Swap network with ...\n\t*n_layers = {}\n\t*n_gates = {}'.format(n_layers, len(Vlist_start)))
 
     print(f'\n### Run model for t={t} ###')
