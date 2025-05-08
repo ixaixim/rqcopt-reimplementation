@@ -9,8 +9,9 @@ Manipulation Complexity: Operations like "remove all identity gates" or "find al
 
 Add dataclasses (python 3.7+) clear structure, type hints, mutable by default, easy to add methods, minimal boilerplate, good readability. Overhead is very low. 
 
+__init__.py is used to turn a folder of .py into an importable package (e.g. for simpler user experience, e.g. 'from circuit import Gate')
 Ideal structure of the folder:
-my_quantum_optimizer/
+RQCOPT/
 ├── main.py                  # Main script to run experiments
 ├── config.yaml              # Configuration file (parameters, paths, etc.)
 │
@@ -44,9 +45,9 @@ my_quantum_optimizer/
     └── timing.py              # get_duration function
 
 
-# questions for Isabel:
+# questions for Isabel (18.05.2025):
 # in tn_brickwall_methods, in get_riemannian_gradient_and_cost_function, why do you compute cost_F in two different ways depending on whether the reference MPO is normalized or not?
-# Note: When calculating the cost, Isabel computes the normalized Frobenius norm difference (also: she forgot to divide by two? to normalize it). On the other hand, the Gibbs paper computes the Hilbert-Schmidt-Test (HST), where the cost is naturally in (0,1). What is the difference?
+# Note: When calculating the cost, Isabel computes the normalized Frobenius norm difference (also: should we divide by two? to normalize it). On the other hand, the Gibbs paper computes the Hilbert-Schmidt-Test (HST), where the cost is naturally in (0,1). What is the difference?
 # Frobenius norm of the difference: represents a squared euclidean distance measure between the two operators in matrix space. Has the term Re(Tr(U^dagW))
 # HST: insensitive to global phases. Has the term |Tr(U^dagW)|^2. Relates to the average fidelity when the unitaries act on random quantum states. 
 
@@ -59,20 +60,6 @@ my_quantum_optimizer/
 I.e. why does each site contribute sqrt(2) instead of 2 to the Hilbert space scaling, for a normalized MPO? does it have to do with the norm of the identity, which is sqrt(2^n)
 
 
-Question: 
-when merging mpo to layer right to left, if the layer is even, we need to start with RQ decomposition:
-    '''
-    layer_is_below corresponds to layer_is_left
-    '''
-    n_spin_orbitals=len(mpo_init)
-    if not odd_layer:  # For even layers
-        Q, R = canonicalize_local_tensor(mpo_init[-1], left=False)
-        mpo_res = [Q]; i_mpo_init=n_spin_orbitals-2
-    else:
-        mpo_res=[]; i_mpo_init=n_spin_orbitals-1
-What is happening exactly?
-
-
 Why using dataclass:
 Instead of writing boilerplate code for methods like __init__, __repr__, and __eq__, you simply annotate your class with @dataclass, and these methods are automatically generated based on the class’s annotations.
 Note: plain dataclasses are mutable by default, whereas JAX workflows are immutable. So if we want to use dataclasses as containers for JAX arrays, consider @dataclass(frozen=True). 
@@ -81,3 +68,8 @@ The frozen=True flag ensures that instances of the class are immutable after cre
 Some libraries in the JAX ecosystem (for example, Flax) offer their own dataclass decorators (e.g., flax.struct.dataclass). These variants might offer additional functionality or optimizations that are tailored to the kinds of immutable, functionally pure data containers that JAX transformations require.
 
 
+Question for Isabel: (01.05.2025)
+- Since the loss is Tr(U_circuit U_MPO^dagger), do we need to take the Dagger of the Ref MPO? Or is this already provided in the correct form? 
+- Clarification on the update step process (vertical and horizontal sweep and caching system). 
+- Possible clarification on the environment tensor ordering (do we take the transpose?) -> verify by doing finite differences. 
+- Environment: do we have to take the conjugate after "cutting out the gate"?
