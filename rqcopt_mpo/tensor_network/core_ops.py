@@ -1,9 +1,13 @@
+import rqcopt_mpo.jax_config
+
 import jax.numpy as jnp
 import numpy as np # Used for np.prod
 from scipy.linalg import rq # RQ decomposition is readily available in SciPy # NOTE: this cannot be accelerated with jax (we formulate an alternative suggestion when using this function.)
-from rqcopt_mpo.core_objects import GateLayer, Gate
+from rqcopt_mpo.circuit.circuit_dataclasses import GateLayer, Gate
 from rqcopt_mpo.mpo.mpo_dataclass import MPO
+from rqcopt_mpo.utils.utils import gate_map
 from typing import Tuple, Optional, Dict, List, Sequence
+import jax
 
 def canonicalize_local_tensor(
     tensor: jnp.ndarray,
@@ -106,6 +110,19 @@ def canonicalize_local_tensor(
 
     return canonical_tensor, factor_matrix
 
+def merge_one_mpo_and_gate(
+        mpo: jnp.ndarray,
+        gate: jnp.ndarray,
+        gate_is_below: bool = None
+) -> jnp.ndarray:
+    
+    if gate_is_below:
+        return jnp.einsum('iabk, bc -> iack', mpo, gate, optimize='optimal')
+    elif not gate_is_below:
+        return jnp.einsum('ab, ibck -> iack', gate, mpo, optimize='optimal')
+    else:
+        raise ValueError("You need to specify the relative position of the gate and the MPO.")
+    
 def merge_two_mpos_and_gate(
     mpo1: jnp.ndarray,
     mpo2: jnp.ndarray,
@@ -435,17 +452,7 @@ def contract_mpo_with_layer_right_to_left(
 
     # --- Prepare Gate Lookup ---
     # Initialize with None since at most one gate (or no gate) acts on each qubit.
-    gate_map: Dict[int, Optional[Gate]] = {i: None for i in range(n_sites)}
-    for gate in layer.gates:
-        rightmost_site = max(gate.qubits)  # two-qubit gates will be assigned to the higher index
-        if rightmost_site < n_sites:
-            if gate_map[rightmost_site] is not None:
-                # Optionally warn if there's already a gate assigned here.
-                print(f"Warning: Overwriting gate on site {rightmost_site} with gate {gate.name}.")
-            gate_map[rightmost_site] = gate
-        else:
-            print(f"Warning: Gate {gate.name} acts on qubits {gate.qubits} outside MPO range (0-{n_sites-1}). Skipping.")
-
+    _ , gate_map_right = gate_map(layer=layer, n_sites=n_sites)
     # --- Right-to-Left Sweep ---
     mpo_res_tensors: List[jnp.ndarray] = [None] * n_sites
     # R_factor: shape (old_right_bond_dim, new_right_bond_dim) from perspective of mpo_i
@@ -455,7 +462,7 @@ def contract_mpo_with_layer_right_to_left(
     i = n_sites - 1
     while i >= 0:
         # Retrieve the gate (or None if no gate acts on site i)
-        gate_acting_here = gate_map.get(i)
+        gate_acting_here = gate_map_right.get(i)
         gate_1q = None
         gate_2q = None
 
@@ -484,7 +491,7 @@ def contract_mpo_with_layer_right_to_left(
             mpo_i_prime = jnp.einsum('iabj, jk -> iabk', mpo_i, R_to_carry_left, optimize='optimal')
 
             # 2. Merge MPOs and the Gate
-            merged_T = merge_two_mpos_and_gate(mpo_im1, mpo_i_prime, gate_2q.tensor_4d, gate_is_below=layer_is_below)
+            merged_T = merge_two_mpos_and_gate(mpo_im1, mpo_i_prime, gate_2q.tensor, gate_is_below=layer_is_below)
 
             # 3. Split back using SVD (right part canonical)
             mpo_im1_temp, mpo_i_final = split_tensor_into_half_canonical_mpo_pair(
@@ -494,7 +501,7 @@ def contract_mpo_with_layer_right_to_left(
            # 5. Process the left part (mpo_im1_temp)
             if i - 1 == 0:
                 # This is the leftmost tensor, do NOT canonicalize. It absorbed the final R implicitly during split.
-                print(f"Storing final tensor for site 0 (shape {mpo_im1_temp.shape}) without canonicalization.")
+                # print(f"Storing final tensor for site 0 (shape {mpo_im1_temp.shape}) without canonicalization.")
                 mpo_res_tensors[i - 1] = mpo_im1_temp
                 R_to_carry_left = None # No more R factor needed
             else:
@@ -519,17 +526,10 @@ def contract_mpo_with_layer_right_to_left(
             # Output shape (l,p,p,new_r)
             tensor_after_absorb = jnp.einsum('iabj, jk -> iabk', current_tensor, R_to_carry_left, optimize='optimal')
 
-            # 2. Apply 1Q gate if present
-            tensor_after_gate = tensor_after_absorb # Default if no gate
+            # 2. Apply 1Q gate if present, else do nothing
+            tensor_after_gate = tensor_after_absorb
             if gate_1q is not None:
-                gate_tensor = gate_1q.tensor_4d
-                if gate_tensor.shape == (2, 2):
-                    if layer_is_below: # Gate acts on p_in (index 2)
-                        tensor_after_gate = jnp.einsum('iabk, bc -> iack', tensor_after_absorb, gate_tensor, optimize='optimal')
-                    else: # Gate acts on p_out (index 1)
-                        tensor_after_gate = jnp.einsum('ab, ibck -> iack', gate_tensor, tensor_after_absorb, optimize='optimal')
-                else:
-                     print(f"Warning: Skipping 1Q gate {gate_1q.name} on site {i} due to non-2x2 shape {gate_tensor.shape}.")
+                tensor_after_gate = merge_one_mpo_and_gate(mpo=tensor_after_absorb, gate=gate_1q.tensor, gate_is_below=layer_is_below)
 
             
             # 3. Canonicalize or Store Final Tensor
@@ -556,10 +556,13 @@ def contract_mpo_with_layer_right_to_left(
 
     final_mpo = MPO(tensors=mpo_res_tensors)
     # Mark as only partially canonical
-    final_mpo.is_right_canonical = False # Since site 0 is not canonical
+    final_mpo.is_right_canonical = True # Although site 0 is not canonical
 
     return final_mpo
 
+# TODO: we should be canonicalizing also in case the gate is not present there (i.e. gate is None)!!
+# add this to both contraction left_to_right as well as right_to_left.
+# TODO: add a test that covers this. 
 def contract_mpo_with_layer_left_to_right(
     mpo_init: MPO,
     layer: GateLayer,
@@ -588,28 +591,14 @@ def contract_mpo_with_layer_left_to_right(
         A new MPO object representing the contracted result. Tensors at
         indices 0 to n_sites-2 are approximately left-canonical.
     """
-    n_sites = mpo_init.n_sites
-    if n_sites == 0:
-        return MPO(tensors=[])
-    if n_sites < 2:
-        print("Warning: Left-to-right sweep requires at least 2 sites for 2Q gate logic. Behavior might be limited for n_sites=1.")
-        # Handle n_sites=1 separately if needed, depends on gate types allowed
+    n_sites = mpo_init.n_sites     # need to handle minimum 3 sites
 
     initial_tensors = mpo_init.tensors
     dtype = initial_tensors[0].dtype
 
     # --- Prepare Gate Lookup ---
     # Store gates based on the *leftmost* site they act on
-    gate_map: Dict[int, Optional[Gate]] = {i: None for i in range(n_sites)}
-    for gate in layer.gates:
-        leftmost_site = min(gate.qubits) # Use leftmost site
-        if leftmost_site < n_sites:
-            if gate_map[leftmost_site] is not None:
-                print(f"Warning: Overwriting gate starting on site {leftmost_site} with gate {gate.name}.")
-            gate_map[leftmost_site] = gate
-        else:
-            print(f"Warning: Gate {gate.name} acts on qubits {gate.qubits} outside MPO range (0-{n_sites-1}). Skipping.")
-
+    gate_map_left, _ = gate_map(layer=layer, n_sites=n_sites)
     # --- Left-to-Right Sweep ---
     mpo_res_tensors: List[jnp.ndarray] = [None] * n_sites
     # R_factor: shape (new_left_bond_dim, old_left_bond_dim) from perspective of mpo_i+1
@@ -619,7 +608,7 @@ def contract_mpo_with_layer_left_to_right(
     i = 0
     while i < n_sites:
         # print(f"Processing site i={i}...") # Debug
-        gate_acting_here = gate_map.get(i)
+        gate_acting_here = gate_map_left.get(i)
         gate_1q = None
         gate_2q = None
 
@@ -647,7 +636,7 @@ def contract_mpo_with_layer_left_to_right(
 
             # 2. Merge MPOs and the Gate
             # Pass `gate_is_below` correctly to `merge_two_mpos_and_gate`'s `gate_is_below` parameter
-            merged_T = merge_two_mpos_and_gate(mpo_i_prime, mpo_ip1, gate_2q.tensor_4d, gate_is_below=layer_is_below)
+            merged_T = merge_two_mpos_and_gate(mpo_i_prime, mpo_ip1, gate_2q.tensor, gate_is_below=layer_is_below)
 
             # 3. Split back using SVD (left part canonical)
             mpo_i_final, mpo_ip1_temp = split_tensor_into_half_canonical_mpo_pair(
@@ -686,14 +675,7 @@ def contract_mpo_with_layer_left_to_right(
             tensor_after_gate = tensor_after_absorb
             if gate_1q is not None:
                 # print(f"    Applying 1Q gate {gate_1q.name}")
-                gate_tensor = gate_1q.tensor_4d # 1Q gate tensor is (2,2)
-                if gate_tensor.shape == (2, 2):
-                    if layer_is_below: # Gate acts on p_in (index 2)
-                        tensor_after_gate = jnp.einsum('iabk, bc -> iack', tensor_after_absorb, gate_tensor, optimize='optimal')
-                    else: # Gate acts on p_out (index 1)
-                        tensor_after_gate = jnp.einsum('ab, ibck -> iack', gate_tensor, tensor_after_absorb, optimize='optimal')
-                else:
-                     print(f"Warning: Skipping 1Q gate {gate_1q.name} on site {i} due to non-2x2 shape {gate_tensor.shape}.")
+                tensor_after_gate = merge_one_mpo_and_gate(mpo=tensor_after_absorb, gate=gate_1q.tensor, gate_is_below=layer_is_below)                
 
             # 3. Canonicalize or Store Final Tensor
             if i == n_sites - 1:
@@ -717,12 +699,27 @@ def contract_mpo_with_layer_left_to_right(
 
     final_mpo = MPO(tensors=mpo_res_tensors)
     # Mark as only partially canonical
-    final_mpo.is_left_canonical = False # Since site n-1 is not canonical
+    final_mpo.is_left_canonical = True # Although last site is not canonical.
 
     return final_mpo
 
-
-
+def contract_mpo_with_layer(
+    mpo_init: MPO,
+    layer: GateLayer,
+    layer_is_below: bool,
+    max_bondim: Optional[int] = None,
+    svd_cutoff: float = 1e-12,
+    direction: str = None
+):
+    """
+    Applies contract_mpo_with_layer_right_to_left or contract_mpo_with_layer_left_to_right depending on the specified direction.
+    """
+    if direction == 'left_to_right':
+        return contract_mpo_with_layer_left_to_right(mpo_init, layer, layer_is_below, max_bondim, svd_cutoff)
+    elif direction == 'right_to_left':
+        return contract_mpo_with_layer_right_to_left(mpo_init, layer, layer_is_below, max_bondim, svd_cutoff)
+    else:
+        raise ValueError("Please specify either either as 'left_to_right' or 'right_to_left'.")
 # def contract_mpo_with_layer(mpo: List[jnp.ndarray], layer: GateLayer, direction: str, max_bondim: int, layer_is_below: bool, **kwargs) -> List[jnp.ndarray]:
 #     pass
 

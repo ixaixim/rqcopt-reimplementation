@@ -1,9 +1,12 @@
+import rqcopt_mpo.jax_config
 import jax.numpy as jnp
 import jax
 import numpy as np
 from typing import List
 
 from .mpo_dataclass import MPO
+from rqcopt_mpo.circuit.circuit_dataclasses import Circuit
+from rqcopt_mpo.tensor_network.core_ops import contract_mpo_with_layer
 
 def get_id_mpo(nsites: int, dtype=jnp.complex64) -> MPO:
     """
@@ -21,7 +24,8 @@ def get_id_mpo(nsites: int, dtype=jnp.complex64) -> MPO:
     """
     if nsites <= 0:
         raise ValueError("Number of sites must be positive.")
-
+    if dtype is None:
+        raise ValueError("Current dtype is None. Please select a real or complex dtype.")
     # Local tensor: 2x2 identity reshaped to (1, 2, 2, 1)
     # Corresponds to (left_bond=1, phys_out=2, phys_in=2, right_bond=1)
     id_phys = jnp.eye(2, dtype=dtype)
@@ -47,7 +51,7 @@ def get_id_mpo(nsites: int, dtype=jnp.complex64) -> MPO:
 def _rand_complex(shape, *, dtype=jnp.complex64, key=None):
     if key is None:  # new random seed every time
         key = jax.random.PRNGKey(np.random.randint(0, 2**31 - 1))
-    k_re, k_im = jax.random.split(key)
+    k_re, k_im = jax.random.split(key) # uses the same key to generate to uncorrelated keys for real and imaginary part. 
     return (jax.random.normal(k_re, shape, dtype=jnp.float32) +
             1j * jax.random.normal(k_im, shape, dtype=jnp.float32)
            ).astype(dtype)
@@ -64,6 +68,7 @@ def create_dummy_mpo(bond_dims_right, phys_dim=2, *, dtype=jnp.complex64,
         Right virtual bond dimension for every site (its length sets n_sites).
         The left bond of site *s* is simply bond_dims_right[s‑1] (with 1 for s=0).
         Use leading/trailing 1s for open boundaries.
+        End the sequence with 1 for open boundaries. 
     phys_dim : int, default 2
         Local physical Hilbert‑space dimension.
     dtype : jax.numpy dtype, default complex64
@@ -97,3 +102,23 @@ def create_dummy_mpo(bond_dims_right, phys_dim=2, *, dtype=jnp.complex64,
         left_dim = right_dim                # becomes next site's left bond
 
     return MPO(tensors)
+
+# create from circuit
+# create an id mpo and place it at the beginning (bottom) of the circuit 
+# absorb layers from above
+
+def circuit_to_mpo(circuit: Circuit):
+    # create from circuit
+    # create an id mpo and place it at the beginning (bottom) of the circuit 
+    # absorb layers from above
+    # NOTE: contracting from above, starting from last layer, is equivalent.
+    dtype = circuit.layers[0].gates[0].matrix.dtype
+    n_sites = circuit.n_sites
+    mpo = get_id_mpo(n_sites, dtype=dtype)
+    
+
+    direction = 'right_to_left'
+    for l in circuit.layers:
+        mpo = contract_mpo_with_layer(mpo_init=mpo, layer=l, layer_is_below=False, direction=direction)
+        direction = 'right_to_left' if direction == 'left_to_right' else 'left_to_right'
+    return mpo

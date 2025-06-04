@@ -73,3 +73,48 @@ Question for Isabel: (01.05.2025)
 - Clarification on the update step process (vertical and horizontal sweep and caching system). 
 - Possible clarification on the environment tensor ordering (do we take the transpose?) -> verify by doing finite differences. 
 - Environment: do we have to take the conjugate after "cutting out the gate"?
+
+
+Update: Added deepcopies of Gate, GateLayer, Circuit object.
+Questions: 
+during contractions, how would you treat None gates (i.e. no gates at circuit)? 
+Two alternatives:
+- more performing code (but longer code): add a case that handles None gates.
+- more clean code (but longer run time): have an identity tensor in place of the None gate. 
+It boils down to whether this slows down the overall computation or not. Are identity contractions less expensive than regular contractions?
+
+Unit tests added: 
+test_identity: target: id mpo, init circuit: identical circuit. Results:
+[-2.3841858e-07 -2.3841858e-07  0.0000000e+00 -2.3841858e-07
+  0.0000000e+00 -2.3841858e-07 -2.3841858e-07 -2.3841858e-07
+  0.0000000e+00 -2.3841858e-07  0.0000000e+00 -2.3841858e-07]
+  Why does it not stay zero? 
+
+Canonicalize MPO:
+how to treat the norm? There is no guarantee that the last tensor (resulting from upper triangular matrix) will be real. 
+Isabel simply assumes it is real: if nrm<0: nrm=-nrm; R,Q=-R,-Q  # Flip sign of last tensor and dummy (norm) tensor to ensure positive norm
+In case Norm is not real: absorb phase of R into Q and keep the 
+
+30.05.2025
+NOTE for Isabel: Review QR decomposition when canonicalizing tensors. It is not guaranteed that R diagonal entries are real, according to numpy/jax.
+                  Therefore we need to manually enforce positiveness (https://www.geeksforgeeks.org/qr-decomposition-in-machine-learning/?utm_source=chatgpt.com).
+                  Note: this will not affect the use case because we always absorb R. 
+
+
+Added: test merge MPO with layer (check matrix result, check left/right isometry conserved on all sites.)
+Result: every TN operation in core_ops.py is correct.
+Added: test trace with MPO.
+Result: Found out that before contracting init_circuit with ref_mpo to compute Tr(ref_mpo^dag init_circuit) we need to "dagger" the ref_mpo (or the circuit, depends on the order).
+
+11.06.2025
+Adding jax.config.update("jax_enable_x64", True) everywhere fixes the problem of single-to-double precision.
+NOTE: add before jax.numpy import. Made a jax_config file.
+
+When testing accuracy of a contraction, how much should I set the tolerance?
+Example at the moment:         assert jnp.allclose(trace, matrix_trace, rtol=1e-6, atol=1e-8), f"{trace} != {matrix_trace}"
+
+Interesting: 
+when going from circuit_to_mpo when getting the target, I sweep from the bottom, alternating left/right.
+But it seems that the initial direction is relevant for final precision
+
+NOTE: jax numpy DOES NOT DO AUTOMATIC UPCASTING, you have to make sure every matrix you deal with is in the highest precision.

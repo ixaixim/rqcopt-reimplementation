@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 import numpy as np
 from rqcopt_mpo.tensor_network.core_ops import canonicalize_local_tensor, merge_two_mpos_and_gate, split_tensor_into_half_canonical_mpo_pair, contract_mpo_with_layer_right_to_left, contract_mpo_with_layer_left_to_right
-from rqcopt_mpo.core_objects import Gate, GateLayer
+from rqcopt_mpo.circuit.circuit_dataclasses import Gate, GateLayer
 from rqcopt_mpo.mpo.mpo_dataclass import MPO
 from rqcopt_mpo.optimization.gradient import compute_layer_boundary_environments
 # --- Example Usage ---

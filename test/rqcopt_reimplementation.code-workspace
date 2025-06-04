@@ -1,0 +1,19 @@
+{
+	"folders": [
+		{
+			"name": "rqcopt_reimplementation",
+			"path": ".."
+		}
+	],
+	"settings": {
+		"python.testing.unittestArgs": [
+			"-v",
+			"-s",
+			"./test",
+			"-p",
+			"test_*.py"
+		],
+		"python.testing.pytestEnabled": false,
+		"python.testing.unittestEnabled": true
+	}
+}

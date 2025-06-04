@@ -1,28 +1,40 @@
+import rqcopt_mpo.jax_config
+
 from dataclasses import dataclass, field
 import numpy as np
+import jax.numpy as jnp
 from typing import Tuple, Optional, Any, List, Dict, Set
+import copy
+import jax
 
 # The objects below use the @dataclass decorator for simpler init, repr, (optional immutability, which is a property of jax.numpy). 
 # note: field is a way to customize how each attribute is handled by @dataclass decorator. 
-#       field(default_factory=...) makes sure that the params tuple is not shared across all Gate instantiations. 
+#       field(default_factory=...) makes sure that the params tuple is not shared across all Gate instantiations. Avoids shared mutable defaults (here not so necessary since tuple is immutable, but it is good practice)
 @dataclass
 class Gate:
     """Represents a single gate acting on one or two qubits."""
-    tensor: np.ndarray            # The numerical tensor (2x2 or 4x4)
+    matrix: np.ndarray            # The numerical matrix (2x2 or 4x4)
     qubits: Tuple[int, ...]       # Tuple of qubit indices it acts on (e.g., (q,) or (q1, q2))
     layer_index: int              # The index of the layer this gate belongs to conceptually
     
     # Optional metadata for clarity and tracking
     name: str = ""                # e.g., "ID", "RX", "CNOT", "K1l", "ExpXYZ", "K2r"
-    params: Tuple[Any, ...] = field(default_factory=tuple) # e.g., rotation angle, or (a,b,c) for ExpXYZ
+    params: Tuple[Any, ...] = field(default_factory=tuple) # e.g., rotation angle, or (a,b,c) for ExpXYZ 
     
     # --- Metadata specific to decomposed gates ---
     # Link back to the original 2-qubit gate it came from
     original_gate_qubits: Optional[Tuple[int, int]] = None 
     decomposition_part: Optional[str] = None # e.g., "K1l", "K1r", "Exp", "K2l", "K2r"
 
+    # validation method used after initialization
+    def __post_init__(self):
+        # Basic validation (optional but recommended)
+        expected_dim = 2**len(self.qubits)
+        if self.matrix.shape != (expected_dim, expected_dim):
+            raise ValueError(f"Tensor shape {self.matrix.shape} incompatible with qubits {self.qubits}")
+
     @property # note: we can cache properties, access is attribute-like. 
-    def tensor_4d(self) -> np.ndarray:
+    def tensor(self) -> np.ndarray:
         """
         Returns the gate as a 4-index tensor.
         For a single-qubit gate, simply return the tensor.
@@ -50,15 +62,9 @@ class Gate:
         Here go the previous gates in the circuit.........................
         """
         if self.is_single_qubit():
-            return self.tensor  # shape (2,2)
-        elif self.is_two_qubit():
-            if self.tensor.shape == (4, 4): # index: (out, in) (or (rows, cols) if you prefer)
-                tensor_4d = self.tensor.reshape(2, 2, 2, 2) # (out1, out1, in1, in2) (in tensor network diagram, )
-                return tensor_4d #np.transpose(tensor_4d, (2, 3, 0, 1)) 
-            elif self.tensor.shape == (2, 2, 2, 2):
-                return self.tensor
-            else:
-                raise ValueError(f"Unexpected two-qubit gate tensor shape: {self.tensor.shape}")
+            return self.matrix  # shape (2,2)
+        elif self.is_two_qubit(): # matrix index: (out, in) (or (rows, cols) if you prefer)
+                return self.matrix.reshape(2, 2, 2, 2) # (out1, out1, in1, in2) (in tensor network diagram, )
         else:
             raise ValueError("Unsupported gate qubit number.")
 
@@ -71,30 +77,41 @@ class Gate:
         if not isinstance(other, Gate):
             return NotImplemented
         return id(self) == id(other) # two Gate instances are only equal if they are literally the same object. 
-    
-    # explanation: we need to distinguish gates based on their role in the circuit, not in the data. 
-    # # Create two Gate objects with identical tensors and other parameters,
-    # # but they represent different logical operations in the circuit.
-    # gate1 = Gate(tensor=identity_tensor, qubits=(0,), layer_index=0, name="I_gate")
-    # gate2 = Gate(tensor=identity_tensor, qubits=(1,), layer_index=1, name="I_gate")
-
-    # # Even though gate1.tensor and gate2.tensor are identical,
-    # # gate1 and gate2 are distinct objects.
-    # print(gate1 == gate2)  # This will print: False
-
-
-    # validation method used after initialization
-    def __post_init__(self):
-        # Basic validation (optional but recommended)
-        expected_dim = 2**len(self.qubits)
-        if self.tensor.shape != (expected_dim, expected_dim):
-            raise ValueError(f"Tensor shape {self.tensor.shape} incompatible with qubits {self.qubits}")
-            
+                
     def is_single_qubit(self) -> bool:
         return len(self.qubits) == 1
 
     def is_two_qubit(self) -> bool:
         return len(self.qubits) == 2
+    
+    def copy(self) -> 'Gate': # annotation: the class name Gate has not been fully defined yet. Python will delay the evaluation until after the class is defined. 
+        """
+        Creates a deep copy of this Gate instance.
+
+        The numerical data in `matrix` is copied.
+        Immutable attributes (qubits, layer_index, name, etc.) are assigned directly.
+        The `params` tuple is deepcopied to handle potential mutable elements within it.
+        """
+        # Deep copy the numerical matrix. 
+        # Deep copy 'params'. While the tuple itself is immutable, its elements
+        # (specified by 'Any') could be mutable. copy.deepcopy ensures these are
+        # also copied independently.
+        # Tuples of primitive types (e.g. self.qubits), and primitive types (e.g. self.name) are immutable (i.e. types that cannot be changed in place). Assigning an immutable type will effectively copy it. 
+        copied_matrix = self.matrix.copy()
+
+        copied_params = copy.deepcopy(self.params)
+
+        new_gate = Gate(
+            matrix=copied_matrix,
+            qubits=self.qubits,
+            layer_index=self.layer_index,
+            name=self.name,
+            params=copied_params,
+            original_gate_qubits=self.original_gate_qubits,
+            decomposition_part=self.decomposition_part
+        )
+        return new_gate
+
 
 @dataclass
 class GateLayer:
@@ -102,12 +119,33 @@ class GateLayer:
     layer_index: int
     is_odd: bool          # True if it's an odd layer (acts on (0,1), (2,3)...), False for even ((1,2), (3,4)...)
     gates: List[Gate] = field(default_factory=list) # All gates conceptually in this layer
-
+    n_sites: Optional[int] = None
+    # TODO: add __post_init__ method to check that the gates in layer can be computed in parallel (i.e. no overlapping gates on the same qubits) 
+     
     def add_gate(self, gate: Gate):
         if gate.layer_index != self.layer_index:
              # You might want a warning or error here depending on strictness
              print(f"Warning: Adding gate with layer_index {gate.layer_index} to Layer {self.layer_index}")
         self.gates.append(gate)
+    
+    def copy(self) -> 'GateLayer':
+        """
+        Creates a deep copy of this GateLayer instance.
+
+        The list of gates is newly created, and each Gate within
+        that list is a deep copy of the original gate.
+        Primitive attributes (layer_index, is_odd) are copied by value.
+        """
+        copied_gates = [gate.copy() for gate in self.gates]
+
+        new_layer = GateLayer(
+            layer_index=self.layer_index,
+            is_odd=self.is_odd,
+            gates=copied_gates
+        )
+        return new_layer
+
+
 
 @dataclass
 class Circuit:
@@ -119,24 +157,13 @@ class Circuit:
     hamiltonian_type: Optional[str] = None
     trotter_params: Optional[dict] = None # e.g., {'t': 0.1, 'n_repetitions': 2, ...}
 
+    @property
+    def num_layers(self):
+        return len(self.layers)
+    
     def sort_layers(self):
         """Ensures layers are sorted by index."""
         self.layers.sort(key=lambda layer: layer.layer_index)
-
-    # def get_layer(self, index: int) -> Optional[GateLayer]:
-    #     """Finds a layer by its index."""
-    #     for layer in self.layers:
-    #         if layer.layer_index == index:
-    #             return layer
-    #     return None
-        
-    # def get_all_gates_flat(self) -> List[Gate]:
-    #     """Returns a flat list of all gates, sorted by layer."""
-    #     self.sort_layers()
-    #     all_gates = []
-    #     for layer in self.layers:
-    #         all_gates.extend(layer.gates)
-    #     return all_gates
 
     def print_gates(self, max_per_layer=10):
          print(f"Circuit with {self.n_sites} sites and {len(self.layers)} layers.")
@@ -149,13 +176,82 @@ class Circuit:
             for gate in layer.gates:
                 if count < max_per_layer:
                     # Ensure tensor is on CPU for printing shape if using JAX GPU
-                    shape_str = str(np.shape(gate.tensor)) 
+                    shape_str = str(np.shape(gate.matrix)) 
                     print(f"  {gate.name} ({gate.decomposition_part}) on {gate.qubits} shape:{shape_str}")
                 elif count == max_per_layer:
                     print(f"  ... (omitting remaining {len(layer.gates) - count} gates)")
                 count += 1
             if not layer.gates:
                 print("  (Layer is empty)")
+
+    def copy(self) -> 'Circuit':
+        """Creates a deep copy of this Circuit instance."""
+        # Deep copy layers: iterate and call GateLayer's copy method
+        copied_layers = [layer.copy() for layer in self.layers]
+
+        # Deep copy trotter_params if it exists (dictionaries are mutable)
+        copied_trotter_params = copy.deepcopy(self.trotter_params) if self.trotter_params is not None else None
+
+        new_circuit = Circuit(
+            n_sites=self.n_sites, # int is immutable
+            layers=copied_layers,
+            hamiltonian_type=self.hamiltonian_type, # str is immutable
+            trotter_params=copied_trotter_params
+        )
+        return new_circuit
+    
+    def to_matrix(self) -> jnp.ndarray:
+        self.sort_layers()
+        total_circuit_matrix = jnp.eye(2**self.n_sites)
+        dtype = self.layers[0].gates[0].matrix.dtype 
+        
+        for layer in reversed(self.layers):
+
+            sorted_gates_in_layer = sorted(layer.gates, key=lambda g: g.qubits[0])
+
+            current_q_idx = 0
+            gate_list_iter_idx = 0
+            ops_for_kron_product = []
+
+            while current_q_idx < self.n_sites:
+                is_identity_for_site = True
+                if gate_list_iter_idx < len(sorted_gates_in_layer):
+                    gate = sorted_gates_in_layer[gate_list_iter_idx]
+                    if gate.qubits[0] == current_q_idx: 
+                        ops_for_kron_product.append(jnp.array((gate.matrix), dtype=dtype))
+                        current_q_idx += len(gate.qubits) # Advance by the number of qubits in the gate
+                        gate_list_iter_idx += 1
+                        is_identity_for_site = False
+
+                if is_identity_for_site:
+                    ops_for_kron_product.append(jnp.eye(2, dtype=dtype)) # Identity for this site
+                    current_q_idx += 1
+
+            # Build the full layer matrix from the collected ops
+            layer_op_matrix_k = ops_for_kron_product[0]
+            for op_idx in range(1, len(ops_for_kron_product)):
+                layer_op_matrix_k = jnp.kron(layer_op_matrix_k, ops_for_kron_product[op_idx])
+
+            # total_circuit_matrix was called next_layer_matrix in your code
+            total_circuit_matrix = total_circuit_matrix @ layer_op_matrix_k 
+
+
+                # gate = layer.gates[gate_list_iter_idx]
+                # gate_qubits = layer.gates[gate_list_iter_idx].qubits
+            #     if gate_qubits[0] == current_q_idx: 
+            #         gate_matrix = gate.matrix 
+            #         current_layer_matrix = jnp.kron(current_layer_matrix, gate_matrix)
+            #         gate_list_iter_idx += 1
+            #         if len(gate_qubits) == 2:
+            #             current_q_idx += 1 # skip one extra site
+            #     current_q_idx += 1 # go to next site
+            
+            # # apply  next_layer_matrix on current matrix
+            # next_layer_matrix = next_layer_matrix @ current_layer_matrix
+        
+        return total_circuit_matrix
+                        
+
 
     def absorb_single_qubit_gates(self, max_passes: int = 1):
         # TODO: this is a general technique to absorb. It works. However, need a better one for just our trotterized case. 

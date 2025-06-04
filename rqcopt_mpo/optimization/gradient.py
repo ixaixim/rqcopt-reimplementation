@@ -1,9 +1,14 @@
+import rqcopt_mpo.jax_config
+
 import jax.numpy as jnp
 import numpy as np
 from typing import Optional, Dict, List, Tuple
+from rqcopt_mpo.utils.utils import gate_map
 from rqcopt_mpo.tensor_network.core_ops import canonicalize_local_tensor, merge_two_mpos_and_gate, split_tensor_into_half_canonical_mpo_pair, contract_mpo_with_layer_right_to_left, contract_mpo_with_layer_left_to_right
-from rqcopt_mpo.core_objects import Gate, GateLayer
+from rqcopt_mpo.circuit.circuit_dataclasses import Gate, GateLayer, Circuit
 from rqcopt_mpo.mpo.mpo_dataclass import MPO
+from rqcopt_mpo.tensor_network.core_ops import contract_mpo_with_layer
+import jax
 
 
 # ---------------------------------------------------------------------
@@ -33,7 +38,7 @@ def _update_left_env(
         return new_L, 1
 
     if gate.is_single_qubit():             # 1-qubit gate
-        g = gate.tensor_4d
+        g = gate.tensor
         new_L = jnp.einsum(
             "ai, abcd, ch, ihbj -> dj", L, A1, g, B1, optimize="optimal"
         )
@@ -42,7 +47,7 @@ def _update_left_env(
     if gate.is_two_qubit():                # 2-qubit gate
         if A2 is None or B2 is None:
             raise ValueError("Two-qubit gate requires A2/B2 tensors.")
-        g = gate.tensor_4d
+        g = gate.tensor
         new_L = jnp.einsum(
             "ai,abcd,defg,cfhk,ihbj,jkel->gl",
             L, A1, A2, g, B1, B2,
@@ -51,60 +56,6 @@ def _update_left_env(
         return new_L, 2
 
     raise ValueError("Unsupported gate type.")
-
-# TODO: check that _update_left_env contractions are correct. 
-# here are the contractions from the previous code for reference(proofed already)
-            # if gate is not None and gate.is_two_qubit():
-
-            #     # --- Two-Qubit Gate at (i, i+1) ---
-            #     if i + 1 >= n_sites:
-            #         print(f"Warning: Skipping 2Q gate {gate.name} at end of chain ({i},{i+1}).")
-            #         # Fall through to treat site i as having no gate starting here
-            #         gate = None # Effectively treat as no gate for update step
-            #     else:
-            #         A2 = E_top[i+1]
-            #         B2 = E_bottom[i+1]
-            #         # Ensure tensor_4d is valid
-            #         gate_tensor = gate.tensor_4d
-            #         if gate_tensor is None:
-            #             print(f"Warning: Skipping 2Q gate {gate.name} due to invalid tensor_4d property.")
-            #             # Reset L or use no-gate contraction? Resetting might be safer.
-            #             # L = jnp.nan * L # Mark as invalid? Or default to no-gate contraction below?
-            #             # i += 1 # Treat as single site without gate
-            #             continue
-
-            #         # Provided einsum for 2Q gate
-            #         L = jnp.einsum('ai,abcd,defg,cfhk,ihbj,jkel->gl', L, A1, A2, gate_tensor, B1, B2, optimize='optimal')
-            #         i += 2 # Advance past the two sites
-
-            #         # cache left env only if a gate starts at the site
-            #         if gate_map_left.get(i) is not None:
-            #             boundary_envs[i] = L # Store env left of site i+2
-
-            #         continue # Skip single site update logic
-
-            # # --- Single-Qubit Gate or No Gate at site i ---
-            # if gate is not None and gate.is_single_qubit():
-            #     # --- One-Qubit Gate ---
-            #     gate_tensor = gate.tensor_4d # Should be (2,2)
-            #     if gate_tensor.shape != (2, 2):
-            #          print(f"Warning: Skipping 1Q gate {gate.name} due to non-2x2 shape {gate_tensor.shape}.")
-            #          # Fall back to No Gate contraction
-            #          L = jnp.einsum('ai, abcd, icbj -> dj', L, A1, B1, optimize='optimal')
-
-            #     L = jnp.einsum('ai, abcd, ch, ihbj -> dj', L, A1, gate_tensor, B1, optimize='optimal') # Need to confirm B1 indices
-            #     i += 1 # Advance one site
-
-            # else:
-            #     # --- No Gate ---
-            #     L = jnp.einsum('ai, abcd, icbj -> dj', L, A1, B1, optimize='optimal')
-            #     i += 1 # Advance one site
-
-            # # cache left env only if a gate starts at the site
-            # if gate_map_left.get(i) is not None:
-            #     boundary_envs[i] = L # Store env left of site i+1
-
-
 
 def _update_right_env(
     R: jnp.ndarray,
@@ -130,7 +81,7 @@ def _update_right_env(
         return new_R, -1
 
     if gate.is_single_qubit():             # 1-qubit gate
-        g = gate.tensor_4d
+        g = gate.tensor
         new_R = jnp.einsum(
             "dj, abcd, ch, ihbj -> ai", R, A1, g, B1, optimize="optimal"
         )
@@ -139,7 +90,7 @@ def _update_right_env(
     if gate.is_two_qubit():                # 2-qubit gate
         if A0 is None or B0 is None:
             raise ValueError("Two-qubit gate requires A0/B0 tensors.")
-        g = gate.tensor_4d
+        g = gate.tensor
         new_R = jnp.einsum(
             "gl,abcd,defg,cfhk,ihbj,jkel->ai",
             R, A0, A1, g, B0, B1,
@@ -148,60 +99,6 @@ def _update_right_env(
         return new_R, -2
 
     raise ValueError("Unsupported gate type.")
-
-# TODO: check that the contractions from _update_right_env are correct. 
-# here is the previous code for reference (proofed.)
-            # if gate is not None and gate.is_two_qubit():
-            #     # --- Two-Qubit Gate at (i-1, i) ---
-            #     if i - 1 < 0:
-            #          print(f"Error: 2Q gate {gate.name} ends at site {i} but goes out of bounds ({i-1}). Cannot contract.")
-            #          break # Stop processing
-            #     else:
-            #         A0 = E_top[i-1]
-            #         B0 = E_bottom[i-1]
-            #         gate_tensor = gate.tensor_4d
-            #         if gate_tensor is None:
-            #              print(f"Warning: Skipping 2Q gate {gate.name} at ({i-1},{i}) due to invalid tensor_4d property.")
-            #         else:
-            #             # Contract with 2Q gate (derived path)
-            #             R = jnp.einsum('gl,abcd,defg,cfhk,ihbj,jkel->ai', R, A0, A1, gate_tensor, B0, B1, optimize='optimal')
-            #             next_i = i - 2 # Advance past the two sites
-
-            # elif gate is not None and gate.is_single_qubit():
-            #     # --- One-Qubit Gate ---
-            #     gate_tensor = gate.tensor_4d
-            #     if gate_tensor is None or gate_tensor.shape != (2, 2):
-            #          print(f"Warning: Skipping 1Q gate {gate.name} at site {i} due to invalid shape {gate_tensor.shape if gate_tensor is not None else 'None'}.")
-            #     else:
-            #          R = jnp.einsum('dj, abcd, ch, ihbj -> ai', R, A1, gate_tensor, B1, optimize='optimal')
-            #     next_i = i - 1
-
-            # else:
-            #     # --- No Gate ends at site i ---
-            #     # Still need to contract the MPOs to propagate R
-            #     R = jnp.einsum('dj, abcd, icbj -> ai', R, A1, B1, optimize='optimal')
-            #     next_i = i - 1
-
-def gate_map(layer: GateLayer, n_sites: int):
-    # Map starting site to gate
-    gate_map_left: Dict[int, Optional[Gate]] = {i: None for i in range(n_sites)}
-    # Map ending site to gate
-    gate_map_right: Dict[int, Optional[Gate]] = {i: None for i in range(n_sites)}
-
-    for gate in layer.gates:
-        leftmost_site = min(gate.qubits)
-        rightmost_site = max(gate.qubits)
-        if leftmost_site < n_sites:
-            if gate_map_left[leftmost_site] is not None:
-                 print(f"Warning: Multiple gates starting at site {leftmost_site}. Using last found: {gate.name}.")
-            gate_map_left[leftmost_site] = gate
-        if rightmost_site < n_sites:
-             if gate_map_right[rightmost_site] is not None:
-                 print(f"Warning: Multiple gates ending at site {rightmost_site}. Using last found: {gate.name}.")
-             gate_map_right[rightmost_site] = gate
-    return gate_map_left, gate_map_right
-
-
 
 def compute_layer_boundary_environments(
     E_top: MPO,
@@ -236,13 +133,10 @@ def compute_layer_boundary_environments(
     n_sites = E_top.n_sites
     if n_sites != E_bottom.n_sites:
         raise ValueError(f"E_top ({n_sites} sites) and E_bottom ({E_bottom.n_sites} sites) must have the same length.")
-    if n_sites == 0:
-        return []
     if side not in ['left', 'right']:
         raise ValueError("side must be 'left' or 'right'")
 
-    dtype = E_top.tensors[0].dtype # Assume consistent dtypes
-
+    dtype = E_top.tensors[0].dtype 
     # --- Prepare Gate Maps ---
     gate_map_left, gate_map_right = gate_map(layer, n_sites)
 
@@ -291,7 +185,7 @@ def compute_layer_boundary_environments(
                    f"do not end with bond dim 1. Initial environment R might be incorrect.")
              # Re-initialize R if needed
 
-        # Store initial environment if a gate ends at site n_sites-1
+        # Store initial environment if a gate ends at site n_sites-1, otherwise continue. 
         if gate_map_right.get(n_sites-1) is not None:
              boundary_envs[n_sites-1] = R
 
@@ -365,8 +259,6 @@ def compute_gate_environment_tensor(
     n_sites = len(E_top_layer)
     if n_sites != len(E_bottom_layer):
         raise ValueError(f"E_top ({n_sites} sites) and E_bottom ({len(E_bottom_layer)} sites) must have the same length.")
-    if n_sites == 0:
-        raise ValueError("Cannot compute environment for MPOs with zero sites.")
 
     num_qubits = len(gate_qubits)
     # 1. Identify the site indices involved
@@ -382,8 +274,7 @@ def compute_gate_environment_tensor(
         # 2. Extract the relevant MPO tensors
         E_top_tensors = (E_top_layer[i],)
         E_bottom_tensors = (E_bottom_layer[i],)
-        environment_tensor = jnp.einsum('ab, acde, bfcg, eg -> fd', E_left_boundary, E_top_tensors[0], E_top_tensors[1], E_bottom_tensors[0], E_bottom_tensors[1], E_right_boundary)
-        # TODO: take conjugate? transpose?
+        environment_tensor = jnp.einsum('ab, acde, bfcg, eg -> df', E_left_boundary, E_top_tensors[0], E_bottom_tensors[0], E_right_boundary)
 
     elif num_qubits == 2:
         # Assume adjacent qubits for standard environment calculation
@@ -392,35 +283,137 @@ def compute_gate_environment_tensor(
         if ip1 != i + 1:
             # This calculation typically assumes adjacent sites for the direct contraction.
             # Non-adjacent gates require a different, more complex contraction scheme
-            # (like iteratively contracting intermediate MPO sites into boundary tensors),
             # which is not implemented here.
             raise ValueError(f"Environment calculation currently assumes adjacent qubits for 2Q gates. Got {gate_qubits}.")
         # Check bounds
         if not (0 <= i < n_sites and 0 <= ip1 < n_sites):
              raise ValueError(f"Two qubit indices {(i, ip1)} out of bounds for MPO with {n_sites} sites.")
         print(f"  Calculating environment for 2Q gate at sites ({i}, {ip1})")
-        indices = (i, ip1)
 
         # 2. Extract the relevant MPO tensors
         E_top_tensors = (E_top_layer[i], E_top_layer[ip1])
         E_bottom_tensors = (E_bottom_layer[i], E_bottom_layer[ip1])
 
-        # we take the notation: for the environment (out1, out2, in1, in2), so that a Hilbert-Schmidt inner product L(X) = <E,X> = Tr(E^dag X), where E is the environment tensor obtained by "cutting out" X from the bra-ket network.
-        # the trace is expressed as jnp.trace(environment_part.transpose(2,3,0,1).reshape((4,4)).conj() @ gate_tensor.reshape(4,4))
-        environment_tensor = jnp.einsum('ab, acde, efgh, bick, kjfl, hl -> ijdg', E_left_boundary, E_top_tensors[0], E_top_tensors[1], E_bottom_tensors[0], E_bottom_tensors[1], E_right_boundary)
+        environment_tensor = jnp.einsum('ab, acde, efgh, bick, kjfl, hl -> dgij', E_left_boundary, E_top_tensors[0], E_top_tensors[1], E_bottom_tensors[0], E_bottom_tensors[1], E_right_boundary)
     else:
         raise ValueError(f"Unsupported number of gate qubits: {num_qubits}. Expected 1 or 2.")
     
     return environment_tensor
 
 def compute_trace(Environment: jnp.ndarray, gate_tensor: jnp.ndarray):
-    # computes the loss function from the Hilbert-Schmidt inner product L(X) = <E,X> = Tr(E^dag X), where E is the environment tensor obtained by "cutting out" X from the bra-ket network.
-    # E has the (out1, out2, in1, in2) ordering.  
-    trace = jnp.einsum('ijdg, ijdg ->', Environment.conj(), gate_tensor)
-    # or equivalently:
-    # trace_val = jnp.trace(environment_part.transpose(2,3,0,1).conj().reshape((4,4)) @ gate_tensor.reshape(4,4)) # equivalent, to use if environment is stored with (in1, in2, out1, out2)
+    if gate_tensor.shape == (2,2,2,2):
+        trace = jnp.einsum('ijdg, ijdg ->', Environment, gate_tensor)
+    elif gate_tensor.shape == (2,2):
+        trace = jnp.einsum('ij, ij ->', Environment, gate_tensor)
 
+    else:
+        raise ValueError(f"Unsupported gate_tensor shape: {gate_tensor.shape}. Expected (2,2) or (2,2,2,2).")
     return trace
-# def calculate_cost_function(circuit: Circuit, mpo_ref: MPO, max_bondim: int, **kwargs) -> float:
 
-# TODO: cost function = derivative + plug in the gate
+def compute_upper_lower_environments(
+        mpo_ref: MPO, 
+        circuit: Circuit, 
+        direction: str, 
+        init_direction: str, 
+        max_bondim_env: int
+    ) -> Dict[int, MPO]:
+    """
+    Compute and cache the upper or lower MPO environments for a given circuit.
+
+    This routine contracts a reference MPO (`mpo_ref`) through the layers of
+    `circuit` in the specified `direction`, truncating at each step to at most
+    `max_bondim_env` bond dimension. The result is a dictionary mapping each
+    layer index to the environment MPO situated above (for `direction='top'`) or
+    below (for `direction='bottom'`) that layer.
+
+    Parameters
+    ----------
+    mpo_ref : MPO
+        The initial MPO at the boundary of the circuit (top or bottom).
+    circuit : Circuit
+        The circuit whose layered structure defines the contraction path.
+    direction : {'top', 'bottom'}
+        Which environment to build:
+        - `'top'`: start from the top boundary and move downward through layers.
+        - `'bottom'`: start from the bottom boundary and move upward (not yet implemented).
+    init_direction : {'left_to_right', 'right_to_left'}
+        The direction to contract MPOs within each layer on the first step;
+        alternates on each subsequent layer.
+    max_bondim_env : int
+        Maximum bond dimension to retain when truncating the environment MPO
+        after each layer contraction.
+
+    Returns
+    -------
+    Dict[int, MPO]
+        A mapping from layer index `ℓ` to the MPO representing the environment
+        just above (for `'top'`) or just below (for `'bottom'`) layer ℓ. For
+        `direction='top'`, keys run from 0 up to `circuit.num_layers-1`.
+
+    Raises
+    ------
+    ValueError
+        If `direction` is not one of `'top'` or `'bottom'`, or if
+        `'bottom'` is requested but not yet implemented.
+    """
+
+    if direction not in ('top', 'bottom'):
+        raise ValueError(f"direction must be 'top' or 'bottom', got '{direction}'")
+
+    if direction == 'top':
+        all_E_top: Dict[int, MPO] = {}
+
+        E_top_current = mpo_ref # Or retrieve from reset cache
+        all_E_top = {circuit.num_layers-1: E_top_current} # Assuming L layers, index L is above layer L-1
+        print(f"    Stored E_top[{circuit.num_layers-1}]")
+
+        sweep_direction = init_direction #'left_to_right' # Or 'right_to_left', choose convention. depends on canonical state of ref mpo
+        for l in range(circuit.num_layers - 2, -1, -1): # L-2 down to 0
+            layer_above = circuit.layers[l+1] # The layer just processed
+
+            E_top_current = contract_mpo_with_layer(
+                E_top_current,
+                layer_above,
+                layer_is_below=True,          # contracting a layer *below* E_top
+                max_bondim=max_bondim_env,
+                direction=sweep_direction
+            )
+
+            # flip for the next layer
+            sweep_direction = "right_to_left" if sweep_direction == "left_to_right" else "left_to_right"
+
+            # Cache environment that now sits *above* layer l
+            all_E_top[l] = E_top_current  
+            print(f"    Stored E_top[{l}]")
+
+        return all_E_top   
+
+    if direction == 'bottom':
+        all_E_bot: Dict[int, MPO] = {}
+
+        E_bot_current = mpo_ref # should be an id MPO
+        all_E_bot = {0: E_bot_current} # Layer 0 bottom Env is initialized.
+        print(f"    Stored E_bot[0]")
+
+        sweep_direction = init_direction #'left_to_right' # Or 'right_to_left', choose convention. depends on canonical state of ref mpo
+        for l in range(1, circuit.num_layers): # 1 to L-1
+            layer_below = circuit.layers[l-1] # The layer just processed
+
+
+            E_bot_current = contract_mpo_with_layer(
+                E_bot_current,
+                layer_below,
+                layer_is_below=False,          # contracting a layer *above* E_bot
+                max_bondim=max_bondim_env,
+                direction=sweep_direction
+            )
+
+            # flip for the next layer
+            sweep_direction = "right_to_left" if sweep_direction == "left_to_right" else "left_to_right"
+
+            # Cache environment that now sits *above* layer l
+            all_E_bot[l] = E_bot_current  
+            print(f"    Stored E_bot[{l}]")
+
+
+        return all_E_bot

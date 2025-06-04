@@ -1,8 +1,9 @@
+import rqcopt_mpo.jax_config
+
 import jax.numpy as jnp
 from jax.numpy.linalg import qr
 from scipy.linalg import rq
 from jax import config
-config.update("jax_enable_x64", True)    
 
 # def get_identity_two_qubit_tensors(n, use_TN=True):
 #     '''

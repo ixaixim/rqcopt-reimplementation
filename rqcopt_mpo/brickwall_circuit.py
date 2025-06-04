@@ -9,7 +9,7 @@ c.update("jax_enable_x64", True)
 # from .fermionic_systems import get_swap_network_trotter_gates_fermi_hubbard_1d, get_swap_network_trotter_gates_molecular
 from .spin_systems import get_brickwall_trotter_gates_spin_chain
 from .util import get_identity_layers
-from .core_objects import Circuit, GateLayer, Gate
+from rqcopt_mpo.circuit.circuit_dataclasses import Circuit, GateLayer, Gate
 from qiskit.synthesis import TwoQubitWeylDecomposition
 
 # Define some operators
