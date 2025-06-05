@@ -48,9 +48,9 @@ def generate_random_circuit(
         Probabilities (per site) of generating 1‑ and 2‑qubit gates.
         They must satisfy 0 ≤ p_single, p_two and p_single + p_two ≤ 1.
     seed : int | None
-        Fix the jax random seed for reproducibility.
+        Fix the jax random seed for reproducibility. For unitary matrix generation.
     rng : np.random.Generator | None
-        Optional NumPy RNG for reproducibility.
+        Optional NumPy RNG for reproducibility. For circuit structure.
     gate_name_single, gate_name_two : str
         Labels stored in each Gate’s ``name`` field.
 

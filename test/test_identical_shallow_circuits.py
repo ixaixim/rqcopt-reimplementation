@@ -15,7 +15,7 @@ n_sites = 7
 # generate random target circuit.
 target_circuit = generate_random_circuit(
     n_sites=n_sites,
-    n_layers=8,
+    n_layers=7,
     p_single=0.3,
     p_two=0.3,
     seed=43,
@@ -48,7 +48,7 @@ print(f"Trace 1: {tr1}, Trace 2: {tr2}")
 
 
 # run optimization routine. 
-_, loss = optimize_circuit_local_svd(circuit_initial=init_circuit, mpo_ref=target_mpo, num_sweeps=1, max_bondim_env=128, svd_cutoff=1e-14)
+_, loss = optimize_circuit_local_svd(circuit_initial=init_circuit, mpo_ref=target_mpo, num_sweeps=1, layer_update_passes=1, max_bondim_env=128, svd_cutoff=1e-14)
 
 loss_hst = 1 - 1/2**(2*n_sites) * np.abs(loss)**2
 if jnp.allclose(jnp.array(loss_hst), 0, atol=1e-12):

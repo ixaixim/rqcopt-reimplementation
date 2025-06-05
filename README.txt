@@ -118,3 +118,9 @@ when going from circuit_to_mpo when getting the target, I sweep from the bottom,
 But it seems that the initial direction is relevant for final precision
 
 NOTE: jax numpy DOES NOT DO AUTOMATIC UPCASTING, you have to make sure every matrix you deal with is in the highest precision.
+
+Added: right to left sweep. Test for shallow circuits with same layout, but different gates.
+
+Q for isabel:
+top-bottom sweep after the bottom-top sweep: it makes sense to store the recently updated bottom envs from the bottom-top sweep. 
+We use these layers in the top-bottom. Right? I.e. no need for a new computation from zero.

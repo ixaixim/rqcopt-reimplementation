@@ -1,0 +1,22 @@
+# Configuration of model before training
+
+hamiltonian: heisenberg
+n_sites: 6
+degree: 2
+n_repetitions: 1
+n_id_layers: 0
+t: 0.25
+disordered: False
+load: False
+load_reference: True
+normalize_reference: True
+ref_nbr: 1
+lr: 5e-3
+n_iter: 100
+optimizer: ADAM
+max_bondim: 128
+script_path: /home/neelmiscia/data/rqcopt_reimplementation/run
+server: local
+model_nbr: 6
+model_dir: /home/neelmiscia/data/rqcopt_reimplementation/run/heisenberg/results/6
+reference_dir: /home/neelmiscia/data/rqcopt_reimplementation/run/heisenberg/reference
