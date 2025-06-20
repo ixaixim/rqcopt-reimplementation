@@ -1,4 +1,4 @@
-# the environment tensor is defined as E = d/dG* Tr(G^adj E). 
+# the environment tensor is defined as E^* := d/dG Tr(U_reference^adj U_QC) = d/dG Tr(E^adj G). 
 # check that the analytical environment corresponds to the numerical Wirtinger derivative above.
 import rqcopt_mpo.jax_config
 
@@ -90,12 +90,12 @@ def numeric_env_conj(f, G0, h: float = 1e-6):
 
 seed_init = 42 
 seed_target = 44
-n_sites = 4
+n_sites = 5
 
 # generate random target circuit.
 target_circuit = generate_random_circuit(
     n_sites=n_sites,
-    n_layers=6,
+    n_layers=4,
     p_single=0.3,
     p_two=0.3,
     seed=seed_target,
@@ -118,7 +118,7 @@ target_mpo_dag = target_mpo.dagger()
 # generate initial circuit (different than target).
 init_circuit = generate_random_circuit(
     n_sites=n_sites,
-    n_layers=6,
+    n_layers=10,
     p_single=0.3,
     p_two=0.3,
     seed=seed_init,
@@ -126,7 +126,7 @@ init_circuit = generate_random_circuit(
     gate_name_two='U2',
     dtype=jnp.complex128
     )
-
+init_circuit.print_gates()
 # compute and store all top environments
 print("     Storing top environments:")
 E_top = compute_upper_lower_environments(mpo_ref=target_mpo_dag, circuit=init_circuit, direction='top', init_direction='left_to_right', max_bondim_env=128)
@@ -136,7 +136,6 @@ id_mpo = get_id_mpo(nsites=n_sites, dtype=jnp.complex128)
 E_bot = compute_upper_lower_environments(mpo_ref=id_mpo, circuit=init_circuit, direction='bottom', init_direction='left_to_right', max_bondim_env=128)
 
 # compute the left and right environment for each gate
-# Test that Tr(E^dag G) = Tr(U^dag U) = Tr(I) = 2^N 
 for layer_ind in range(init_circuit.num_layers):
     layer = init_circuit.layers[layer_ind]
     print(f"\n===== Layer {layer_ind} =====")
@@ -175,7 +174,7 @@ for layer_ind in range(init_circuit.num_layers):
             E_bottom_layer=E_bot[layer_ind],
             E_left_boundary=E_left[q0],
             E_right_boundary=E_right[q1]
-        )
+        ).conj()
 
         if len(gate.qubits) == 2:
             E_anal = E_anal.reshape(4,4)
@@ -216,6 +215,5 @@ for layer_ind in range(init_circuit.num_layers):
         else:
             print("        ✓ environment check passed")
         
-# TODO: add check that verifies the following: f holomorphic (i.e. analytical) iff d/dz^conj f = 0.
 
 

@@ -12,14 +12,19 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import jax 
 
-n_sites = 4
-target_seed = 44
+n_sites = 5
+target_seed = 44 # same seed for both circuits to assign circuit layout. 
+n_layers = 20
+p_single = 0.3
+p_two = 0.3
+
+
 # generate random target circuit.
 target_circuit = generate_random_circuit(
     n_sites=n_sites,
-    n_layers=8,
-    p_single=0.3,
-    p_two=0.3,
+    n_layers=n_layers,
+    p_single=p_single,
+    p_two=p_two,
     seed=45, # for gate matrix
     rng=np.random.default_rng(seed=target_seed),
     gate_name_single='U1',
@@ -33,14 +38,16 @@ target_circuit.print_gates()
 print("Converting target circuit to MPO...")
 target_mpo = circuit_to_mpo(target_circuit)
 target_mpo.left_canonicalize()
+# norm = target_mpo.normalize()
+# print(f'Target circuit norm is {norm}')
 
 
 # generate initial circuit with same layout, but different gates.
 init_circuit = generate_random_circuit(
     n_sites=n_sites,
-    n_layers=8,
-    p_single=0.3,
-    p_two=0.3,
+    n_layers=n_layers,
+    p_single=p_single,
+    p_two=p_two,
     seed=43,
     rng=np.random.default_rng(seed=target_seed),
     gate_name_single='U1',
@@ -54,7 +61,10 @@ init_circuit.print_gates()
 
 
 # run optimization routine. 
-_, loss = optimize_circuit_local_svd(circuit_initial=init_circuit, mpo_ref=target_mpo, num_sweeps=1, layer_update_passes=1, max_bondim_env=128, svd_cutoff=1e-14)
+_, loss = optimize_circuit_local_svd(circuit_initial=init_circuit, mpo_ref=target_mpo, 
+                                     num_sweeps=5, layer_update_passes=3, 
+                                     max_bondim_env=128, svd_cutoff=0.0
+                                     )
 
 loss_hst = 1 - 1/2**(2*n_sites) * np.abs(loss)**2
 # if jnp.allclose(jnp.array(loss_hst), 0, atol=1e-12):

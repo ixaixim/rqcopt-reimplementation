@@ -40,7 +40,7 @@ circuit.print_gates()
 
 
 # run optimization routine
-_, loss = optimize_circuit_local_svd(circuit_initial=circuit, mpo_ref=target, num_sweeps=1, max_bondim_env=64)
+_, loss = optimize_circuit_local_svd(circuit_initial=circuit, mpo_ref=target, num_sweeps=20, max_bondim_env=64)
 
 loss_hst = 1 - 1/2**(2*n_sites) * np.abs(loss)**2
 

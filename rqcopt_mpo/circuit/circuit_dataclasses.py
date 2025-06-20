@@ -12,7 +12,7 @@ import jax
 #       field(default_factory=...) makes sure that the params tuple is not shared across all Gate instantiations. Avoids shared mutable defaults (here not so necessary since tuple is immutable, but it is good practice)
 @dataclass
 class Gate:
-    """Represents a single gate acting on one or two qubits."""
+    """Represents `a single gate acting on one or two` qubits."""
     matrix: np.ndarray            # The numerical matrix (2x2 or 4x4)
     qubits: Tuple[int, ...]       # Tuple of qubit indices it acts on (e.g., (q,) or (q1, q2))
     layer_index: int              # The index of the layer this gate belongs to conceptually
@@ -117,7 +117,7 @@ class Gate:
 class GateLayer:
     """Represents a single layer in the brickwall circuit."""
     layer_index: int
-    is_odd: bool          # True if it's an odd layer (acts on (0,1), (2,3)...), False for even ((1,2), (3,4)...)
+    is_odd: bool          # True if it's an even layer (acts on (0,1), (2,3)...), False for odd ((1,2), (3,4)...)
     gates: List[Gate] = field(default_factory=list) # All gates conceptually in this layer
     n_sites: Optional[int] = None
     # TODO: add __post_init__ method to check that the gates in layer can be computed in parallel (i.e. no overlapping gates on the same qubits) 
@@ -234,172 +234,11 @@ class Circuit:
 
             # total_circuit_matrix was called next_layer_matrix in your code
             total_circuit_matrix = total_circuit_matrix @ layer_op_matrix_k 
-
-
-                # gate = layer.gates[gate_list_iter_idx]
-                # gate_qubits = layer.gates[gate_list_iter_idx].qubits
-            #     if gate_qubits[0] == current_q_idx: 
-            #         gate_matrix = gate.matrix 
-            #         current_layer_matrix = jnp.kron(current_layer_matrix, gate_matrix)
-            #         gate_list_iter_idx += 1
-            #         if len(gate_qubits) == 2:
-            #             current_q_idx += 1 # skip one extra site
-            #     current_q_idx += 1 # go to next site
-            
-            # # apply  next_layer_matrix on current matrix
-            # next_layer_matrix = next_layer_matrix @ current_layer_matrix
         
         return total_circuit_matrix
                         
 
 
-    def absorb_single_qubit_gates(self, max_passes: int = 1):
-        # TODO: this is a general technique to absorb. It works. However, need a better one for just our trotterized case. 
-        # TODO: consider a merge_layer function instead. It will be used inside absorb_single_qubit_gates. 
-        """
-        Iteratively absorbs consecutive single-qubit gates acting on the same qubit.
-
-        Compares adjacent layers (L_i, L_{i+1}). If a single-qubit gate on
-        qubit q exists in both, they are multiplied (gate_{i+1} @ gate_i)
-        and replaced by a single gate placed in layer L_i. The original
-        gates are removed. This process repeats until no more absorptions
-        can be made in a full pass, or max_passes is reached.
-        Empty layers are removed, and layers are re-indexed at the end.
-
-        Args:
-            max_passes: Maximum number of sweeps through the layers to absorb gates.
-        """
-        if not self.layers or len(self.layers) < 2:
-            print("Absorption skipped: Not enough layers.")
-            return 0 # No absorptions possible
-
-        total_absorbed_count = 0
-        for pass_num in range(max_passes):
-            print(f"\n--- Absorption Pass {pass_num + 1} ---")
-            absorptions_in_pass = 0
-            
-            # Keep track of gates to remove/add for this pass
-            # Use gate IDs as keys in remove_map for safety if gates are somehow duplicated
-            gates_to_remove_map: Dict[int, Set[int]] = {layer.layer_index: set() for layer in self.layers}
-            gates_to_add_map: Dict[int, List[Gate]] = {layer.layer_index: [] for layer in self.layers}
-            
-            # Need to iterate using indices because the list length might change conceptually
-            # But act on copies or use the map approach to avoid modification issues
-            current_layers = self.layers # Operate on the list from the previous pass or start
-
-            for i in range(len(current_layers) - 1):
-                layer_curr = current_layers[i]
-                layer_next = current_layers[i+1]
-                
-                idx_curr = layer_curr.layer_index
-                idx_next = layer_next.layer_index
-
-                # Create a lookup for single-qubit gates in the *next* layer by qubit index
-                # Important: Only consider gates NOT already marked for removal in this pass
-                next_layer_sq_gates: Dict[int, Gate] = {}
-                remove_set_next = gates_to_remove_map.get(idx_next, set())
-                for gate_next in layer_next.gates:
-                     # Check if single qubit AND not already marked for removal
-                    if gate_next.is_single_qubit() and id(gate_next) not in remove_set_next:
-                        q_next = gate_next.qubits[0]
-                        if q_next in next_layer_sq_gates:
-                           # This shouldn't happen if layers truly represent parallel ops, but good to check
-                           print(f"Warning: Multiple single-qubit gates found on qubit {q_next} in layer {idx_next}. Using the first one found.")
-                        else:
-                           next_layer_sq_gates[q_next] = gate_next
-
-                # Iterate through gates in the current layer
-                remove_set_curr = gates_to_remove_map.get(idx_curr, set())
-                for gate_curr in layer_curr.gates:
-                    # Check if single qubit AND not already marked for removal
-                    if not gate_curr.is_single_qubit() or id(gate_curr) in remove_set_curr:
-                        continue
-
-                    q_curr = gate_curr.qubits[0]
-
-                    # Find a partner in the next layer's lookup
-                    gate_next = next_layer_sq_gates.get(q_curr)
-
-                    if gate_next:
-                        # --- Found a pair to absorb ---
-                        absorptions_in_pass += 1
-                        
-                        # Perform absorption: New tensor = Next Gate * Current Gate
-                        # Ensure tensors are compatible (e.g., both (2,2))
-                        if gate_curr.tensor.shape == (2,2) and gate_next.tensor.shape == (2,2):
-                             new_tensor = gate_next.tensor @ gate_curr.tensor
-                        else:
-                             print(f"Warning: Skipping absorption on qubit {q_curr} between layers {idx_curr} and {idx_next} due to incompatible shapes: {gate_curr.tensor.shape} and {gate_next.tensor.shape}")
-                             continue # Skip this absorption
-
-                        # Create the new absorbed gate - place it in the current layer (layer i)
-                        new_gate = Gate(
-                            tensor=new_tensor,
-                            qubits=(q_curr,),
-                            layer_index=idx_curr, # Belongs to the layer of the first gate
-                            name="AbsorbedSQ",
-                            params=(),
-                            original_gate_qubits=None, # Origin is mixed
-                            decomposition_part="Absorbed"
-                        )
-
-                        # Mark original gates for removal (use IDs for safety)
-                        gates_to_remove_map.setdefault(idx_curr, set()).add(id(gate_curr))
-                        gates_to_remove_map.setdefault(idx_next, set()).add(id(gate_next))
-
-                        # Add the new gate to the current layer's addition list
-                        gates_to_add_map.setdefault(idx_curr, []).append(new_gate)
-
-                        # Remove the consumed 'next' gate from lookup to prevent re-use in this pass
-                        del next_layer_sq_gates[q_curr]
-
-            # --- Update the circuit layers for the next pass ---
-            if absorptions_in_pass == 0:
-                 print("No more absorptions found in this pass.")
-                 break # Exit loop if no changes were made
-
-            new_layers_intermediate = []
-            for layer in current_layers:
-                idx = layer.layer_index
-                current_gates = layer.gates
-                remove_ids = gates_to_remove_map.get(idx, set())
-                add_list = gates_to_add_map.get(idx, [])
-
-                # Filter out removed gates and add new ones
-                final_gates = [g for g in current_gates if id(g) not in remove_ids] + add_list
-
-                # Only keep layer if it has gates
-                if final_gates:
-                     # Create a new layer object. Keep original 'is_odd' for context.
-                     # Layer index will be fixed later.
-                    new_layers_intermediate.append(GateLayer(
-                        layer_index=-1, # Temporary index
-                        is_odd=layer.is_odd,
-                        gates=final_gates
-                    ))
-            
-            # Update self.layers for the next iteration or final result
-            self.layers = new_layers_intermediate 
-            total_absorbed_count += absorptions_in_pass
-            print(f"Absorbed {absorptions_in_pass} gate pairs in pass {pass_num + 1}. Total layers now: {len(self.layers)}")
-
-        # --- Final Cleanup: Remove empty layers and re-index ---
-        print("\n--- Finalizing Absorption ---")
-        final_layers = [layer for layer in self.layers if layer.gates] # Filter empty
-        
-        # Re-index the remaining layers sequentially
-        for i, layer in enumerate(final_layers):
-            layer.layer_index = i # Assign new sequential index
-            # Also update layer_index for all gates within the layer
-            for gate in layer.gates:
-                gate.layer_index = i
-
-        self.layers = final_layers
-        print(f"Absorption complete. Total pairs absorbed: {total_absorbed_count}. Final layer count: {len(self.layers)}")
-        
-        # self.print_gates() # Optional: print final structure
-
-        return total_absorbed_count
 
     # --- You would add methods for compression, analysis, simulation here ---
     # def compress(self, ...)

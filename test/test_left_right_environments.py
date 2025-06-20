@@ -18,12 +18,12 @@ import jax
 
 seed_init = 42 
 seed_target = 44
-n_sites = 4
+n_sites = 5
 
 # generate random target circuit.
 target_circuit = generate_random_circuit(
     n_sites=n_sites,
-    n_layers=6,
+    n_layers=20,
     p_single=0.3,
     p_two=0.3,
     seed=seed_target,
@@ -44,16 +44,16 @@ target_mpo_dag = target_mpo.dagger()
 init_circuit = target_circuit.copy()
 # 
 # generate initial circuit (different than target).
-# init_circuit = generate_random_circuit(
-#     n_sites=n_sites,
-#     n_layers=6,
-#     p_single=0.3,
-#     p_two=0.3,
-#     seed=seed_init,
-#     gate_name_single='U1',
-#     gate_name_two='U2',
-#     dtype=jnp.complex128
-#     )
+init_circuit = generate_random_circuit(
+    n_sites=n_sites,
+    n_layers=6,
+    p_single=0.3,
+    p_two=0.3,
+    seed=seed_init,
+    gate_name_single='U1',
+    gate_name_two='U2',
+    dtype=jnp.complex128
+    )
 
 # compute and store all top environments
 print("     Storing top environments:")

@@ -89,4 +89,4 @@ else:
     prod = layer_matrix @ mpo_matrix
 
 # check that product matches:
-np.testing.assert_allclose(final_mpo_matrix, prod, atol=1e-8), f"Max diff = {jnp.max(jnp.abs(final_mpo_matrix - prod))}"
+np.testing.assert_allclose(final_mpo_matrix, prod, atol=1e-14), f"Max diff = {jnp.max(jnp.abs(final_mpo_matrix - prod))}"

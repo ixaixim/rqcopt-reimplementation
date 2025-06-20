@@ -278,7 +278,7 @@ def compress_SVD(
         return u, s, vh, 0
         
     # Determine truncation based on cutoff
-    k_cutoff = jnp.sum(s / s[0] > cutoff)
+    k_cutoff = int(jnp.sum(s / s[0] > cutoff))
 
     # Determine truncation based on max_bondim
     if max_bondim is None:

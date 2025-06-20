@@ -282,6 +282,66 @@ class MPO:
         print(f"MPO right-canonicalized. Fixed Gauge Norm: {self.norm}")
         return None if normalize else self.norm
 
+    def normalize(self) -> float:
+        """
+        If the MPO is left-canonical (resp. right-canonical) it
+        extracts the global Frobenius norm from the *right-most*
+        (resp. *left-most*) tensor, stores the resulting unit-norm
+        tensor back into ``self.tensors`` and returns the norm.
+
+        The routine does **not** change the canonical flags – it only
+        adjusts the stored norm.  It raises an error if the MPO is
+        not currently in either canonical form.
+        """
+        # -----------------------------------
+        #  Normalise a left-canonical MPO
+        # -----------------------------------
+        if self.is_left_canonical and not self.is_right_canonical:
+            T = self.tensors[-1]                       # (ℓ, p_out, p_in, r)
+            l_prod = int(np.prod(T.shape[:-1]))        # merge all but last leg
+            T_mat = T.reshape((l_prod, T.shape[-1]))   #  (l_prod, r)
+            Q, R = jnp.linalg.qr(T_mat, mode="reduced")
+
+            # fix the overall phase so that R[0,0] ∈ ℝ₊
+            phi  = R[0, 0] / jnp.abs(R[0, 0])
+            Q  *= phi
+            R  *= jnp.conj(phi)
+
+            norm = float(R[0, 0].real)                 # scalar ‖M‖
+
+            # write back the *unit* tensor
+            self.tensors[-1] = Q.reshape(T.shape[:-1] + (Q.shape[-1],))
+            self.norm = norm  # TODO: set to 1 since normalized.
+            return norm
+
+        # -----------------------------------
+        #  Normalise a right-canonical MPO
+        # -----------------------------------
+        if self.is_right_canonical and not self.is_left_canonical:
+            T = self.tensors[0]                        # (ℓ, p_out, p_in, r)
+            r_prod = int(np.prod(T.shape[1:]))         # merge all but first leg
+            T_mat_T = T.reshape((T.shape[0], r_prod)).T  #  (r_prod, ℓ)
+
+            Qp, Rp = jnp.linalg.qr(T_mat_T, mode="reduced")
+            L  = Rp.T                                  # (ℓ, k)  – left factor
+            Q  = Qp.T                                  # (k, r_prod) – core
+
+            # fix the overall phase so that L[0,0] ∈ ℝ₊
+            phi  = L[0, 0] / jnp.abs(L[0, 0])
+            Q  *= phi
+            L  *= jnp.conj(phi)
+
+            norm = float(L[0, 0].real)                 # scalar ‖M‖
+
+            # write back the *unit* tensor
+            self.tensors[0] = Q.reshape((Q.shape[0],) + T.shape[1:])
+            self.norm = norm # TODO: set to 1 since normalized.
+            return norm
+
+        # Neither flag (or both) set → ambiguous state
+        raise ValueError(
+            "MPO must be left- or right-canonical before calling `normalize()`."
+        )
 
     # -----------------------------------------------------------------
     #  Pretty–print the MPO’s structure

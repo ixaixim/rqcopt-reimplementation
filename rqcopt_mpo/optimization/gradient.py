@@ -4,7 +4,6 @@ import jax.numpy as jnp
 import numpy as np
 from typing import Optional, Dict, List, Tuple
 from rqcopt_mpo.utils.utils import gate_map
-from rqcopt_mpo.tensor_network.core_ops import canonicalize_local_tensor, merge_two_mpos_and_gate, split_tensor_into_half_canonical_mpo_pair, contract_mpo_with_layer_right_to_left, contract_mpo_with_layer_left_to_right
 from rqcopt_mpo.circuit.circuit_dataclasses import Gate, GateLayer, Circuit
 from rqcopt_mpo.mpo.mpo_dataclass import MPO
 from rqcopt_mpo.tensor_network.core_ops import contract_mpo_with_layer
@@ -298,13 +297,16 @@ def compute_gate_environment_tensor(
     else:
         raise ValueError(f"Unsupported number of gate qubits: {num_qubits}. Expected 1 or 2.")
     
+    environment_tensor = environment_tensor.conj() 
     return environment_tensor
 
+
 def compute_trace(Environment: jnp.ndarray, gate_tensor: jnp.ndarray):
+    # the environment has been defined such that the full trace tr(U_reference^dagger W_circuit) is equivalent to tr(Env^*T G). 
     if gate_tensor.shape == (2,2,2,2):
-        trace = jnp.einsum('ijdg, ijdg ->', Environment, gate_tensor)
+        trace = jnp.einsum('ijdg, ijdg ->', Environment.conj(), gate_tensor)
     elif gate_tensor.shape == (2,2):
-        trace = jnp.einsum('ij, ij ->', Environment, gate_tensor)
+        trace = jnp.einsum('ij, ij ->', Environment.conj(), gate_tensor)
 
     else:
         raise ValueError(f"Unsupported gate_tensor shape: {gate_tensor.shape}. Expected (2,2) or (2,2,2,2).")
@@ -315,7 +317,8 @@ def compute_upper_lower_environments(
         circuit: Circuit, 
         direction: str, 
         init_direction: str, 
-        max_bondim_env: int
+        max_bondim_env: int,
+        svd_cutoff: float = 1e-12
     ) -> Dict[int, MPO]:
     """
     Compute and cache the upper or lower MPO environments for a given circuit.
@@ -375,8 +378,9 @@ def compute_upper_lower_environments(
                 E_top_current,
                 layer_above,
                 layer_is_below=True,          # contracting a layer *below* E_top
+                direction=sweep_direction,
                 max_bondim=max_bondim_env,
-                direction=sweep_direction
+                svd_cutoff=svd_cutoff
             )
 
             # flip for the next layer
@@ -404,8 +408,9 @@ def compute_upper_lower_environments(
                 E_bot_current,
                 layer_below,
                 layer_is_below=False,          # contracting a layer *above* E_bot
+                direction=sweep_direction,
                 max_bondim=max_bondim_env,
-                direction=sweep_direction
+                svd_cutoff=svd_cutoff
             )
 
             # flip for the next layer

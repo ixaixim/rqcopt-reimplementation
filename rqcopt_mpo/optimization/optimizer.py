@@ -19,8 +19,8 @@ def optimize_circuit_local_svd(
     mpo_ref: MPO,
     num_sweeps: int,
     max_bondim_env: int,           # Max bond dim for environment MPOs
-    svd_cutoff: float = 1e-12,     # Cutoff for gate update SVD
     layer_update_passes: int = 1,  # Passes within a layer (L<->R)
+    svd_cutoff: float = 1e-12,
 ) -> Circuit:
     """
     Optimizes a quantum circuit using iterative local SVD updates based on
@@ -60,7 +60,6 @@ def optimize_circuit_local_svd(
 
 
 
-
     # --- Main Sweep Loop ---
     for sweep in range(num_sweeps):
         print(f"\n--- Starting Sweep {sweep + 1}/{num_sweeps} ---")
@@ -72,7 +71,8 @@ def optimize_circuit_local_svd(
         print("  Computing Top Environments...")
         top_layer_sweep_direction = 'left_to_right' if mpo_ref.is_right_canonical else 'right_to_left'
         all_E_top = compute_upper_lower_environments(
-            mpo_ref=mpo_ref, circuit=circuit, direction='top', init_direction=top_layer_sweep_direction, max_bondim_env=max_bondim_env
+            mpo_ref=mpo_ref, circuit=circuit, direction='top', init_direction=top_layer_sweep_direction, 
+            max_bondim_env=max_bondim_env, svd_cutoff=svd_cutoff,
             )
 
         # --- Step 2: Bottom-Up Sweep (Update Gates) ---
@@ -90,20 +90,20 @@ def optimize_circuit_local_svd(
                 # --- Left-to-Right Pass within layer ---
                 pass_losses_lr = _layer_pass_left_to_right(
                     current_layer, E_top_l, E_bottom_current, 
-                    n_sites, dtype, max_bondim_env, svd_cutoff
+                    n_sites, dtype,
                 )
                 loss_history.extend(pass_losses_lr)
-                
+                print(1 - 1/2**(2*n_sites) * np.abs(pass_losses_lr)**2)
                 # --- Right-to-Left Pass within layer ---
                 # Similar logic, compute left boundaries, sweep right-to-left
                 # NOTE: the logic of the R-> L pass is different from the L->R, in the sense that it is more simple.
-                pass_losses_lr = _layer_pass_right_to_left(
+                pass_losses_rl = _layer_pass_right_to_left(
                     current_layer, E_top_l, E_bottom_current, 
-                    n_sites, dtype, max_bondim_env, svd_cutoff
+                    n_sites, dtype,
                 )
-                loss_history.extend(pass_losses_lr)
-                
-                
+                loss_history.extend(pass_losses_rl)
+                print(1 - 1/2**(2*n_sites) * np.abs(pass_losses_rl)**2)
+
 
             # --- Update Bottom Environment for the *next* layer ---
                         
@@ -128,7 +128,6 @@ def optimize_circuit_local_svd(
         E_top_current = mpo_ref 
         top_layer_sweep_direction = 'left_to_right' if mpo_ref.is_right_canonical else 'right_to_left'
 
-        # NOTE: if you plan to compute the trace, it might be better to store E_bottom by using compute_upper_lower_environments instead of caching. Reason: you might end up with mpo_ref and mpo version of circuit with canonicity in the same direction.
         #    Retrieve/Compute E_bottom_l: done at end of Bottom-up sweep 
         all_E_bottom[0] = mpo_identity
         for l in reversed(range(circuit.num_layers)): # L-1 up to zero
@@ -142,18 +141,19 @@ def optimize_circuit_local_svd(
                 # --- Left-to-Right Pass within layer ---
                 pass_losses_lr = _layer_pass_left_to_right(
                     current_layer, E_top_current, E_bottom_l, 
-                    n_sites, dtype, max_bondim_env, svd_cutoff
+                    n_sites, dtype, 
                 )
                 loss_history.extend(pass_losses_lr)
-                
+                print(1 - 1/2**(2*n_sites) * np.abs(pass_losses_lr)**2)
                 # --- Right-to-Left Pass within layer ---
                 # Similar logic, compute left boundaries, sweep right-to-left
                 # NOTE: the logic of the R-> L pass is different from the L->R, in the sense that it is more simple.
-                pass_losses_lr = _layer_pass_right_to_left(
+                pass_losses_rl = _layer_pass_right_to_left(
                     current_layer, E_top_current, E_bottom_l, 
-                    n_sites, dtype, max_bondim_env, svd_cutoff
+                    n_sites, dtype,
                 )
-                loss_history.extend(pass_losses_lr)
+                loss_history.extend(pass_losses_rl)
+                print(1 - 1/2**(2*n_sites) * np.abs(pass_losses_rl)**2)
 
             # --- Update Top Environment for the *next* layer ---
             
@@ -177,146 +177,141 @@ def optimize_circuit_local_svd(
 
 
 
+
         # --- End of Sweep ---
 
-    # return circuit with updated gates, return loss function. 
     return circuit, loss_history
 
-
 def _layer_pass_left_to_right(
-    current_layer: GateLayer,  # Modified in-place
+    current_layer: GateLayer,        # <-- mutated in-place
     E_top_l: MPO,
     E_bottom_current: MPO,
     n_sites: int,
     dtype: jnp.dtype,
-    max_bondim_env: int, # For boundary env computations if they truncate # TODO (boundary env computations do not have truncation atm)
-    svd_cutoff: float
 ) -> List[float]:
     """
-    Performs a left-to-right sweep within a single layer, updating gates.
-    Modifies current_layer.gates in-place.
+    Left-to-right sweep through one GateLayer.
+    Updates current_layer.gates in-place and returns the sweep loss history.
     """
-    pass_loss_history = []
     print("      L->R Pass...")
+    pass_loss_history: List[float] = []
 
-    # 1. Compute all right boundary envs for this layer
+    # ──────────────────────────────────────────────────────────────────────────
+    # 1.  Pre–compute all *right* boundary environments for the layer
+    #     (the mirror of the “left” boundaries used in the R→L sweep).
+    # ──────────────────────────────────────────────────────────────────────────
     E_right_boundaries = compute_layer_boundary_environments(
-        E_top_l, E_bottom_current, current_layer, side='right'
+        E_top_l, E_bottom_current, current_layer, side="right"
     )
-    E_left_boundaries = [None] * n_sites
-    # 2. Initialize E_left_current (e.g., identity tensor)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # 2.  Initialise the running *left* environment to the identity (bond-dim 1)
+    # ──────────────────────────────────────────────────────────────────────────
     E_left_current = jnp.eye(1, dtype=dtype)
-    # 3. Loop through qubits in layer:
 
-    gate_to_idx_map = {id(g): idx for idx, g in enumerate(current_layer.gates)}
-    i = 0
-
+    # Build a dict {site_idx : gate | None} for O(1) lookup.
     gate_map_left, _ = gate_map(current_layer, n_sites)
-    # cache left env only if a gate starts at the site
-    if gate_map_left.get(0) is not None:
-        E_left_boundaries[0] = E_left_current # Environment left of site 0
-    stop_index = max(s for s, g in gate_map_left.items() if g is not None)
-    # NOTE: in the future, it would be better to have an iterator on the layer (from the left, from the right). It makes it easier to go through the sites.
-    while i <= stop_index:
-        # if gate starting at i is present, we check if it is single or two-qubit, or None
-        gate = gate_map_left.get(i)
 
+    # No need to walk past the right-most gate in the layer.
+    last_gate_at_idx = max(s for s, g in gate_map_left.items() if g is not None)
+
+    # We also keep an id→index map so we can overwrite the *exact* object
+    # in current_layer.gates after the SVD step.
+    gate_to_idx_map = {id(g): i for i, g in enumerate(current_layer.gates)}
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # 3.  Sweep from the far-left MPO tensor (site 0) to the last gate.
+    # ──────────────────────────────────────────────────────────────────────────
+    site_i = 0
+    while site_i <= last_gate_at_idx:
+
+        gate = gate_map_left.get(site_i)
+
+        # ──────────────────────────────────────────────────────────────────
+        # 3a.  No gate starting at *site_i*  →  propagate identity one site
+        # ──────────────────────────────────────────────────────────────────
         if gate is None:
-            # Contract the identity through the boundary MPOs
-            E_left_current, _ = _update_left_env(
+            E_left_current, step = _update_left_env(
                 E_left_current,
-                E_top_l[i], E_bottom_current[i]
+                E_top_l[site_i], E_bottom_current[site_i],
             )
-            i += 1  
-            continue               
-
-        elif gate.is_two_qubit():
-
-            #    a. Retrieve E_right_i from E_right_boundaries
-            right_site_index = max(gate.qubits)
-            E_right_current = E_right_boundaries[right_site_index]
-            if E_right_current is None:
-                print(f"Error: Missing right environment for gate ending at site {right_site_index}. Skipping update.")
-            # Update left environment assuming no gate interaction for this step
-
-            #    b. Env = compute_gate_environment_tensor(g_i.qubits, E_top_l, E_bottom_current, E_left_current, E_right_i) #TODO: in gradient.py
-            
-            Env = compute_gate_environment_tensor(gate.qubits, E_top_l, E_bottom_current, E_left_current, E_right_current)
-            trace = compute_trace(Env, gate.tensor)
-            pass_loss_history.append(trace)
-
-            #    c. U, S, Vh = jnp.linalg.svd(Env, full_matrices=False)
-            # Env to matrix: group tensor indices into matrix indexes, separating upper from lower indices. 
-            out_dims = Env.shape[Env.ndim//2:]
-            in_dims = Env.shape[:Env.ndim//2]
-            matrix_env = Env.reshape(np.prod(out_dims), np.prod(in_dims))
-            U, S, Vh = jnp.linalg.svd(matrix_env, full_matrices=False)
-            if svd_cutoff is not None:
-                U, S, Vh, k_trunc = compress_SVD(U, S, Vh, cutoff=svd_cutoff)
-            #    d. Apply cutoff to S if needed
-            
-            new_gate_matrix = U @ Vh 
-            new_gate = gate.copy()
-            new_gate.matrix = new_gate_matrix
-
-            # Store the updated tensor temporarily
-            # updated_gate_tensors[gate_obj] = new_gate_tensor
-
-            #    f. Update E_left_current by contracting with the *updated* g_i, E_top_l sites, E_bottom_current sites
-            E_left_current, _ = _update_left_env(E_left_current, E_top_l[i], E_bottom_current[i], new_gate, E_top_l[i+1], E_bottom_current[i+1])
-            
-            original_gate_id = id(gate)
-            idx_in_layer_list = gate_to_idx_map[original_gate_id]
-            current_layer.gates[idx_in_layer_list] = new_gate
-            i +=2  
-            # loss_history.append(trace)
+            site_i += step                       # step == 1 for identity hop
             continue
 
-        elif gate.is_single_qubit():
-            
-            E_right_current = E_right_boundaries[i]
-            if E_right_current is None:
-                print(f"Error: Missing right environment for gate ending at site {i}. Skipping update.")
-            Env = compute_gate_environment_tensor(gate.qubits, E_top_l, E_bottom_current, E_left_current, E_right_current)
-            trace = compute_trace(Env, gate.tensor)
-                # SVD update
-            # TODO: there might be 5-10x faster method for single gate qubit update: use polar projection to minimize distance of Tr(E^dag G).
-            # for 2x2 matrices there might be closed form O(1). for d>2 dxd matrices, this does not work, and it O(d^3), just like SVD. 
-            U, S, Vh = jnp.linalg.svd(Env, full_matrices=False)
-            if svd_cutoff is not None:
-                U, S, Vh, k_trunc = compress_SVD(U, S, Vh, cutoff=svd_cutoff)
-            new_gate_matrix = U @ Vh          # shape: (d_out, d_in)
-            new_gate = gate.copy()
-            new_gate.matrix = new_gate_matrix
-
-            # Propagate left boundary one site to the right
-            E_left_current, _ = _update_left_env(
-                E_left_current,                 # rank‑k
-                E_top_l[i], E_bottom_current[i],
-                new_gate                 # the updated gate
+        # ──────────────────────────────────────────────────────────────────
+        # 3b.  Gate present.  Gather its right environment and build Env.
+        # ──────────────────────────────────────────────────────────────────
+        rightmost_qb = max(gate.qubits)          # site index of the gate’s RHS
+        E_right_current = E_right_boundaries[rightmost_qb]
+        if E_right_current is None:
+            print(
+                f"Error: Missing left-hand env for gate ending at site "
+                f"{rightmost_qb}.  Skipping update."
             )
-
-            original_gate_id = id(gate)
-            idx_in_layer_list = gate_to_idx_map[original_gate_id]
-            current_layer.gates[idx_in_layer_list] = new_gate
-            i += 1
+            # Still need to move past the gate even if we skip, else infinite loop
+            site_i += (2 if gate.is_two_qubit() else 1)
             continue
 
-        else: 
-            raise TypeError(
-                f"Unsupported gate object at layer {current_layer.layer_index}, site{i}: "
-                f"{gate!r} (expected single-qubit, two-qubit, or None)."
+        Env = compute_gate_environment_tensor(
+            gate.qubits,
+            E_top_l, E_bottom_current,
+            E_left_current,                     # already accumulated left env
+            E_right_current                     # pre-computed right env
+        )
+
+        # ──────────────────────────────────────────────────────────────────
+        # 3c.  SVD-based polar-project update  (same recipe as R→L pass)
+        # ──────────────────────────────────────────────────────────────────
+        env_ndim     = Env.ndim
+        out_shape    = Env.shape[env_ndim // 2 :]
+        in_shape     = Env.shape[: env_ndim // 2]
+        matrix_env   = Env.reshape(np.prod(out_shape), np.prod(in_shape))
+
+        U, S, Vh = jnp.linalg.svd(matrix_env, full_matrices=False)
+
+        new_gate_matrix = (U @ Vh)
+        new_gate_obj    = gate.copy()            # retain meta-data/qubits
+        new_gate_obj.matrix = new_gate_matrix
+
+        trace = compute_trace(Env, new_gate_obj.tensor)
+        pass_loss_history.append(trace)
+
+        # Overwrite the gate inside current_layer.gates
+        idx_in_layer_list = gate_to_idx_map[id(gate)]
+        current_layer.gates[idx_in_layer_list] = new_gate_obj
+
+        # ──────────────────────────────────────────────────────────────────
+        # 3d.  Push the *updated* gate into the running left environment
+        # ──────────────────────────────────────────────────────────────────
+        if gate.is_two_qubit():
+            # Need both sites: site_i and rightmost_qb == site_i+1
+            E_left_current, step = _update_left_env(
+                E_left_current,
+                E_top_l[site_i],   E_bottom_current[site_i],
+                new_gate_obj,
+                E_top_l[rightmost_qb], E_bottom_current[rightmost_qb]
             )
+        else:  # single-qubit gate
+            E_left_current, step = _update_left_env(
+                E_left_current,
+                E_top_l[site_i],   E_bottom_current[site_i],
+                new_gate_obj
+            )
+
+        # ──────────────────────────────────────────────────────────────────
+        # 3e.  Advance the site index by 1 (single-qubit) or 2 (two-qubit)
+        # ──────────────────────────────────────────────────────────────────
+        site_i += step   # step is guaranteed to be 1 or 2 from _update_left_env
+
     return pass_loss_history
 
+# TODO: need to re use the L/R environments from the previous pass!
 def _layer_pass_right_to_left(
     current_layer: GateLayer,  # Modified in-place
     E_top_l: MPO,
     E_bottom_current: MPO,
     n_sites: int,
     dtype: jnp.dtype,
-    max_bondim_env: int, # For boundary env computations if they truncate # TODO (boundary env computations do not have truncation atm)
-    svd_cutoff: float
 ) -> List[float]:
 
     print("      R->L Pass...")
@@ -325,7 +320,7 @@ def _layer_pass_right_to_left(
     E_left_boundaries = compute_layer_boundary_environments(
         E_top_l, E_bottom_current, current_layer, side='left'
     )
-    gate_idx_in_layer = 0
+    gate_to_idx_map = {id(g): i for i, g in enumerate(current_layer.gates)}
     E_right_current = jnp.eye(1, dtype=dtype) # Starts as env to the far right (virtual bond dim 1)
     _, gate_map_right = gate_map(current_layer, n_sites)
 
@@ -357,8 +352,6 @@ def _layer_pass_right_to_left(
             Env = compute_gate_environment_tensor(
                 qubits, E_top_l, E_bottom_current, E_left_current, E_right_current
             )
-            trace = compute_trace(Env, gate.tensor)
-            pass_loss_history.append(trace)
             # Env tensor dimensions are assumed: (in_0, in_1, ..., out_0, out_1, ...)
             env_ndim = Env.ndim
             out_indices_shape = Env.shape[env_ndim//2:] # Shape of output physical legs (for the 'ket' part of the gate matrix)
@@ -367,14 +360,16 @@ def _layer_pass_right_to_left(
             
             matrix_env = Env.reshape(np.prod(out_indices_shape), np.prod(in_indices_shape))
             U_svd, S_svd, Vh_svd = jnp.linalg.svd(matrix_env, full_matrices=False)
-            if svd_cutoff is not None: # This step might not be standard if goal is strictly unitary from SVD
-                U_svd, S_svd, Vh_svd, k_trunc = compress_SVD(U_svd, S_svd, Vh_svd, cutoff=svd_cutoff)
             
-            new_gate_matrix = U_svd @ Vh_svd # Shape (TotalOutDim, TotalInDim)
+            new_gate_matrix = (U_svd @ Vh_svd) # Shape (TotalOutDim, TotalInDim)
             new_gate_obj = gate.copy() # Copies structure (qubits, name, etc.)
             new_gate_obj.matrix = new_gate_matrix 
 
-            current_layer.gates[gate_idx_in_layer] = new_gate_obj
+            trace = compute_trace(Env, new_gate_obj.tensor)
+            pass_loss_history.append(trace)
+
+            idx_in_layer_list = gate_to_idx_map[id(gate)]
+            current_layer.gates[idx_in_layer_list] = new_gate_obj
 
             # Update the right Environment
             if gate.is_two_qubit():

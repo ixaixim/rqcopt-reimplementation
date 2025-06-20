@@ -1,4 +1,10 @@
-from rqcopt_mpo.mpo.mpo_builder import get_id_mpo, create_dummy_mpo
+import rqcopt_mpo.jax_config
+
+from rqcopt_mpo.mpo.mpo_builder import get_id_mpo, create_dummy_mpo, circuit_to_mpo
+from rqcopt_mpo.circuit.circuit_builder import generate_random_circuit
+
+import jax.numpy as jnp
+import numpy as np
 
 # --- Example Usage ---
 num_qubits = 4
@@ -22,3 +28,27 @@ bond_dims_bottom = [bond_left_b,  bond_mid_b,  bond_right_b, 1, 1]
 
 E_top_layer    = create_dummy_mpo(bond_dims_top,    phys_dim, random=True, seed=42)
 E_bottom_layer = create_dummy_mpo(bond_dims_bottom, phys_dim, random=True, seed=42)
+
+# create random unitary circuit. Make it unitary.
+# check norm:
+n_sites = 5
+target_seed = 44 # same seed for both circuits to assign circuit layout. 
+n_layers = 10
+p_single = 0.3
+p_two = 0.3
+
+
+# generate random target circuit.
+target_circuit = generate_random_circuit(
+    n_sites=n_sites,
+    n_layers=n_layers,
+    p_single=p_single,
+    p_two=p_two,
+    seed=45, # for gate matrix
+    rng=np.random.default_rng(seed=target_seed),
+    gate_name_single='U1',
+    gate_name_two='U2',
+    dtype=jnp.complex128
+    )
+target_mpo = circuit_to_mpo(target_circuit, svd_cutoff=0.0)
+target_mpo.left_canonicalize(normalize=True)

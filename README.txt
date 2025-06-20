@@ -113,14 +113,37 @@ NOTE: add before jax.numpy import. Made a jax_config file.
 When testing accuracy of a contraction, how much should I set the tolerance?
 Example at the moment:         assert jnp.allclose(trace, matrix_trace, rtol=1e-6, atol=1e-8), f"{trace} != {matrix_trace}"
 
-Interesting: 
-when going from circuit_to_mpo when getting the target, I sweep from the bottom, alternating left/right.
-But it seems that the initial direction is relevant for final precision
 
 NOTE: jax numpy DOES NOT DO AUTOMATIC UPCASTING, you have to make sure every matrix you deal with is in the highest precision.
 
+Added: test for holomorphic function and of gradient up to machine precision.
 Added: right to left sweep. Test for shallow circuits with same layout, but different gates.
 
 Q for isabel:
 top-bottom sweep after the bottom-top sweep: it makes sense to store the recently updated bottom envs from the bottom-top sweep. 
 We use these layers in the top-bottom. Right? I.e. no need for a new computation from zero.
+
+Q for Isabel: 
+overview of how you do trotterization? E.g. for Heisenberg terms at site i,j do you have a gate for (omitting exp) X_iX_j + Y_iY_j + Z_iZ_j or do you have each component on a differnt layer (X_iX_j layer 0, Y_iY_j layer 1, etc.)?
+
+Q: Weyl decomposition as we are optimizing. Should we do it as soon as we update the gate? Or after we update all gates? 
+Note: Weyl decomposition expands a N-layer brickwall circuit to a 2N+1 layer circuit. When considering the benefits of compression, we need to account for this negative aspect.
+
+Q: I am doing bottom-up then top-down sweep. The Gibbs paper does it opposite. SHould I consider imitating?
+Q: should I report the loss only after the sweep?
+
+02.07
+Q: tests for compression are failing for deeper circuits. Possible reason: error accumulation. error diverges for deeper (depth 30 layers) circuits because of splitting tensors when merging layers.
+Possible solution: maybe normalization?
+A: it was a conjugate issue in the optimizer. Environment has been redefined such that everything is consistent: E^* = d/dG Tr(U_ref^dag U_QC) = d/dG Tr(E^dag G). E is defined s.t. SVD gate update is U@Vh.
+
+Q: can we normalize the QC as well as the target?
+
+commit:
+Added Heisenberg trotterization for a circuit (with error plot test) in trotter/ folder. Heisenberg model build hamiltonian (heisenberg/ folder).
+Important fix to gradient function (a conjugate was missing) so that local SVD update compression leads to monotonic loss. All test work, even for long circuits (this was an issue before the fix).
+Updated tests that were relying on old gradient function.
+Add 'normalize' method in MPO.
+Fix optimizer (pass left_to_right is now coherent with pass right_to_left). 
+Add Weyl decomposition circuit from brickwall. (weyl_circuit_builder.py) 
+Add archived. 

@@ -10,7 +10,7 @@ n_sites = 5
 seed = 42
 random_circuit = generate_random_circuit(
     n_sites=n_sites,
-    n_layers=6,
+    n_layers=40,
     p_single=0.3,
     p_two=0.3,
     seed=seed,
@@ -24,7 +24,7 @@ random_circuit.print_gates()
 random_circuit_matrix = random_circuit.to_matrix()
 random_circuit_matrix_from_mpo = circuit_to_mpo(random_circuit).to_matrix()
 
-jnp.allclose(random_circuit_matrix, random_circuit_matrix_from_mpo, rtol=1e-5, atol=1e-8)
+jnp.allclose(random_circuit_matrix, random_circuit_matrix_from_mpo, rtol=1e-5, atol=1e-13)
 print("Circuit to matrix = Circuit to MPO to matrix")
 
 

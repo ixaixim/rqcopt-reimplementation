@@ -107,7 +107,7 @@ def create_dummy_mpo(bond_dims_right, phys_dim=2, *, dtype=jnp.complex64,
 # create an id mpo and place it at the beginning (bottom) of the circuit 
 # absorb layers from above
 
-def circuit_to_mpo(circuit: Circuit):
+def circuit_to_mpo(circuit: Circuit, svd_cutoff: float = 1e-12):
     # create from circuit
     # create an id mpo and place it at the beginning (bottom) of the circuit 
     # absorb layers from above
@@ -119,6 +119,9 @@ def circuit_to_mpo(circuit: Circuit):
 
     direction = 'right_to_left'
     for l in circuit.layers:
-        mpo = contract_mpo_with_layer(mpo_init=mpo, layer=l, layer_is_below=False, direction=direction)
+        mpo = contract_mpo_with_layer(mpo_init=mpo, layer=l, 
+                                      layer_is_below=False, direction=direction, 
+                                      svd_cutoff=svd_cutoff,
+                                      )
         direction = 'right_to_left' if direction == 'left_to_right' else 'left_to_right'
     return mpo

@@ -3,6 +3,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from typing import List, Tuple, Optional
+from qiskit.synthesis import TwoQubitWeylDecomposition
+from scipy.linalg import expm
 from rqcopt_mpo.circuit.circuit_dataclasses import Gate, GateLayer, Circuit
 
 
@@ -126,3 +128,4 @@ def generate_random_circuit(
         )
 
     return circuit
+

@@ -11,13 +11,13 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import jax 
 
-n_sites = 7
+n_sites = 6
 # generate random target circuit.
 target_circuit = generate_random_circuit(
     n_sites=n_sites,
-    n_layers=7,
+    n_layers=25,
     p_single=0.3,
-    p_two=0.3,
+    p_two=0.4,
     seed=43,
     gate_name_single='U1',
     gate_name_two='U2',
@@ -28,8 +28,9 @@ target_circuit.sort_layers()
 target_circuit.print_gates()
 # transform target into MPO
 print("Converting target circuit to MPO...")
-target_mpo = circuit_to_mpo(target_circuit)
+target_mpo = circuit_to_mpo(target_circuit, svd_cutoff=0.0) 
 target_mpo.left_canonicalize()
+# target_mpo.normalize()
 
 
 # generate initial circuit with same layout, and same gates.
@@ -40,15 +41,19 @@ init_circuit.print_gates()
 # test that the two circuits are actually the same unitary matrix: Tr(init_circuit^dag target_circuit) = Tr(target_circuit^dagger init_circuit)
 # init_matrix = init_circuit.to_matrix()
 # target_matrix = target_circuit.to_matrix()
-init_matrix = circuit_to_mpo(init_circuit).to_matrix()
-target_matrix = circuit_to_mpo(target_circuit).to_matrix()
-tr1 = np.trace(init_matrix.conjugate().T @ target_matrix)
-tr2 = np.trace(target_matrix.conjugate().T @ init_matrix)
-print(f"Trace 1: {tr1}, Trace 2: {tr2}")
+# init_matrix = circuit_to_mpo(init_circuit).to_matrix()
+# target_matrix = circuit_to_mpo(target_circuit).to_matrix()
+# tr1 = np.trace(init_matrix.conjugate().T @ target_matrix)
+# tr2 = np.trace(target_matrix.conjugate().T @ init_matrix)
+# print(f"Trace 1: {tr1}, Trace 2: {tr2}")
 
 
 # run optimization routine. 
-_, loss = optimize_circuit_local_svd(circuit_initial=init_circuit, mpo_ref=target_mpo, num_sweeps=1, layer_update_passes=1, max_bondim_env=128, svd_cutoff=1e-14)
+_, loss = optimize_circuit_local_svd(
+    circuit_initial=init_circuit, mpo_ref=target_mpo, 
+    num_sweeps=1, layer_update_passes=1, 
+    max_bondim_env=128, svd_cutoff=0.0,
+    )
 
 loss_hst = 1 - 1/2**(2*n_sites) * np.abs(loss)**2
 if jnp.allclose(jnp.array(loss_hst), 0, atol=1e-12):
