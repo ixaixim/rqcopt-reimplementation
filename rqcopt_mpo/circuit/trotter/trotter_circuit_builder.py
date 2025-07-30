@@ -4,7 +4,7 @@ from typing import Tuple, Union, List
 
 import jax.numpy as jnp
 
-from rqcopt_mpo.circuit.circuit_dataclasses import GateLayer
+from rqcopt_mpo.circuit.circuit_dataclasses import GateLayer, Circuit
 from rqcopt_mpo.circuit.trotter.trotter_gates import single_layer_trotterized_heisenberg
 
 def trotterized_heisenberg_layers(
@@ -128,6 +128,28 @@ def trotterized_heisenberg_layers(
 
     return layers
 
+def trotterized_heisenberg_circuit(
+    n_sites: int,
+    J: float,
+    D: float,
+    h: float = 0.0,
+    *,                       # everything after this is keyword-only
+    order: int = 1,
+    dt: float,
+    reps: int,
+    dtype: jnp.dtype | None = None,
+):
+    layers = trotterized_heisenberg_layers(
+    n_sites=n_sites, J=J, D=D, h=h,
+    order=order, dt=dt, reps=reps,
+    dtype=dtype
+    )
+    circ = Circuit(
+        n_sites=n_sites,
+        layers=layers,
+    )
+    return circ
 __all__ = [
     "trotterized_heisenberg_layers",
+    "trotterized_heisenberg_circuit"
 ]

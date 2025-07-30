@@ -94,8 +94,7 @@ class Gate:
         """
         # Deep copy the numerical matrix. 
         # Deep copy 'params'. While the tuple itself is immutable, its elements
-        # (specified by 'Any') could be mutable. copy.deepcopy ensures these are
-        # also copied independently.
+        # (specified by 'Any') could be mutable. copy.deepcopy ensures these are also copied independently.
         # Tuples of primitive types (e.g. self.qubits), and primitive types (e.g. self.name) are immutable (i.e. types that cannot be changed in place). Assigning an immutable type will effectively copy it. 
         copied_matrix = self.matrix.copy()
 
@@ -160,6 +159,14 @@ class Circuit:
     @property
     def num_layers(self):
         return len(self.layers)
+    
+    @property
+    def num_gates(self):
+        n = 0
+        for layer in self.layers:
+            for gate in layer.gates:
+                n += 1
+        return n
     
     def sort_layers(self):
         """Ensures layers are sorted by index."""

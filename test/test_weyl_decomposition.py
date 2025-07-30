@@ -2,7 +2,7 @@
 # test whether the absorbtion of single-qubit gates on the weyl decomposed circuit matches the original circuit.
 import rqcopt_mpo.jax_config
 
-from rqcopt_mpo.circuit.trotter.trotter_circuit_builder import trotter_circuit, compress_consecutive_layers
+from rqcopt_mpo.circuit.trotter.trotter_circuit_builder import trotterized_heisenberg_circuit
 from rqcopt_mpo.circuit.weyl_decomposition.weyl_circuit_builder import weyl_decompose_circuit, absorb_single_qubit_layers
 import numpy as np
 import jax.numpy as jnp
@@ -11,17 +11,15 @@ import jax.numpy as jnp
 # Test 1: # test whether the weyl decomposed circuit matches the original circuit.
 ###############################################
 
-original_circ = trotter_circuit(
+original_circ = trotterized_heisenberg_circuit(
     n_sites=4,
     J=1.0,
-    Delta=1.0,
-    delta_t=0.1,
-    n_steps=2,
+    D=1.0,
+    dt=0.1,
+    reps=2,
     order=4,
-    combine_gate_triplet=True,
     dtype=jnp.complex128
 )
-compress_consecutive_layers(original_circ)
 original_circ.print_gates()
 
 

@@ -1,33 +1,37 @@
 import rqcopt_mpo.jax_config
 
+# NOTE: this is a modified copy of optimizer.py. Verify that the two versions are the same, except for the 2 Qubit update. 
 from typing import Optional, List, Dict
 import jax.numpy as jnp
 import numpy as np
-from rqcopt_mpo.circuit.circuit_dataclasses import Circuit, GateLayer, Gate 
+from rqcopt_mpo.circuit.circuit_dataclasses import Circuit, GateLayer
+from qiskit.synthesis import TwoQubitWeylDecomposition
+from rqcopt_mpo.hamiltonian.operators import two_qubit_paulis
+from jax.scipy.linalg import expm
+
 from rqcopt_mpo.mpo.mpo_dataclass import MPO
 from rqcopt_mpo.mpo.mpo_builder import get_id_mpo
-from rqcopt_mpo.tensor_network.core_ops import contract_mpo_with_layer_left_to_right, contract_mpo_with_layer, compress_SVD
+from rqcopt_mpo.tensor_network.core_ops import contract_mpo_with_layer 
 from rqcopt_mpo.optimization.gradient import compute_layer_boundary_environments, _update_left_env, _update_right_env, gate_map, compute_gate_environment_tensor, compute_trace, compute_upper_lower_environments
 from rqcopt_mpo.optimization.utils import global_loss
-import jax
 
-# TODO: create a compute_full_bottom_environment function. to place in gradient.py, instead of doing it optimizer.py
 
 # TODO: cleaner code would never let gate == None, if there is no gate at a site. Cleaner code would just use a single qubit identity gate. Then we can drop the None handling. 
 #       This and lengthy syntax could be avoided if we had an iterator on the layer gates.
-def optimize_circuit_local_svd(
+def optimize_weyl_circuit_local_svd(
     circuit_initial: Circuit,
     mpo_ref: MPO,
     num_sweeps: int,
     max_bondim_env: int,           # Max bond dim for environment MPOs
     layer_update_passes: int = 1,  # Passes within a layer (L<->R)
     svd_cutoff: float = 1e-12,
-    target_is_normalized: bool = False,
+    target_is_normalized : bool = False,
 ) -> Circuit:
     """
     Optimizes a quantum circuit using iterative local SVD updates based on
     environments computed against a reference MPO. Implements the sweep
     strategy described in Gibbs et al., arXiv:2409.16361v1.
+    Adapted to Weyl circuit. The 2-qubit gates are SVD'd, then updated Weyl-like.
 
     Args:
         circuit_initial: The initial Circuit object to optimize.
@@ -271,7 +275,7 @@ def _layer_pass_left_to_right(
 
         U, S, Vh = jnp.linalg.svd(matrix_env, full_matrices=False)
 
-        new_gate_matrix = (U @ Vh)
+        new_gate_matrix = _weyl_gate_update(U, Vh)
         new_gate_obj    = gate.copy()            # retain meta-data/qubits
         new_gate_obj.matrix = new_gate_matrix
 
@@ -361,9 +365,9 @@ def _layer_pass_right_to_left(
 
             
             matrix_env = Env.reshape(np.prod(out_indices_shape), np.prod(in_indices_shape))
-            U_svd, S_svd, Vh_svd = jnp.linalg.svd(matrix_env, full_matrices=False)
+            U, S, Vh = jnp.linalg.svd(matrix_env, full_matrices=False)
             
-            new_gate_matrix = (U_svd @ Vh_svd) # Shape (TotalOutDim, TotalInDim)
+            new_gate_matrix =_weyl_gate_update(U,Vh) # Shape (TotalOutDim, TotalInDim)
             new_gate_obj = gate.copy() # Copies structure (qubits, name, etc.)
             new_gate_obj.matrix = new_gate_matrix 
 
@@ -384,3 +388,22 @@ def _layer_pass_right_to_left(
                 continue
 
     return pass_loss_history
+
+def _weyl_gate_update(U: jnp.ndarray, Vh: jnp.ndarray) -> jnp.ndarray:
+    update = U @ Vh
+    dtype = U.dtype
+    # if gate is single qubit, do regular update:
+    if update.shape == (2,2):
+        return update
+    elif update.shape == (4,4):
+        decomp = TwoQubitWeylDecomposition(update)
+        a, b, c = decomp.a, decomp.b, decomp.c
+        gl_phase = jnp.exp(1j * decomp.global_phase) # not essential for compression purposes, but used to test the match of the weyl decomposed circuit with the original circuit
+
+        # (b) e^{i(...)} layer ---------------------------------------------------
+        XX, YY, ZZ = two_qubit_paulis(dtype=dtype)
+        nonlocal_op = gl_phase * expm(1j*(a*XX + b*YY + c*ZZ))
+        return nonlocal_op
+
+    else:
+        raise NotImplementedError(f"Gate shape is {update.shape}. Not supported at the moment.")

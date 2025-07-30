@@ -11,7 +11,7 @@ from collections import defaultdict
 import numpy as np
 from typing import Dict, List, Tuple
 
-
+# TODO: this implementation currently is not implemented in JAX.
 def weyl_decompose_gate(gate: Gate, k2_layer: int) -> list[Gate]:
     """
     Replace a two-qubit Gate by its Weyl factors.
@@ -73,11 +73,10 @@ def weyl_decompose_circuit(orig: Circuit) -> Circuit:
     new_layers: dict[int, GateLayer] = {}
 
     # layer_offset grows by +2 after every *original* layer
-    layer_offset = 0
     for layer in sorted(orig.layers, key=lambda L: L.layer_index):
         for gate in layer.gates:
-            # Put K2 factors at 'layer.layer_index + layer_offset'
-            target_base = layer.layer_index * 3       # same effect as offset logic
+            # Put K2 factors at 'layer.layer_index + layer_offset = target_base'
+            target_base = layer.layer_index * 3       
             pieces = weyl_decompose_gate(gate, target_base)
 
             # drop each piece into the correct GateLayer --------------------
