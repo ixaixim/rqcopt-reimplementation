@@ -445,6 +445,28 @@ def compute_top_envs(
     )
     return all_E_top
 
+def compute_bottom_envs(
+    circuit: Circuit,
+    *,
+    max_bondim_env: int,
+    svd_cutoff: float,
+    init_sweep_dir: str,
+) -> Dict[int, MPO]:
+    """
+    Pre-compute only the *bottom* environments E_bot[l] (sitting below layer l),
+    analogous to `compute_top_envs`.
+    """
+    print("  Computing Bottom Environments...")
+    all_E_bot = compute_upper_lower_environments(
+        mpo_ref=get_id_mpo(nsites=circuit.n_sites, dtype=circuit.dtype),
+        circuit=circuit,
+        direction="bottom",
+        init_direction=init_sweep_dir,
+        max_bondim_env=max_bondim_env,
+        svd_cutoff=svd_cutoff,
+    )
+    return all_E_bot
+
 
 def sweeping_euclidean_gradient_bottom_up(
     circuit: Circuit,
@@ -640,6 +662,102 @@ def _layer_pass_left_to_right(
         current_site += step
 
     return layer_gradients
+
+def sweeping_euclidean_gradient_top_down(
+    circuit: Circuit,
+    mpo_ref: MPO,                       # usually V† placed on the *top* boundary
+    *,
+    max_bondim_env: int,
+    svd_cutoff: float = 1e-12,
+) -> Tuple[jnp.ndarray, List[jnp.ndarray], Dict[str, int]]:
+    """
+    Top-to-bottom analogue of `sweeping_euclidean_gradient_bottom_up`.
+
+    Strategy
+    --------
+    1.  Pre-compute **bottom** environments E_bot[l] (below each layer) using an
+        identity MPO at the physical bottom of the circuit.
+    2.  Initialise a running *top* environment `E_top_cur` to `mpo_ref†`
+        (the boundary MPO sitting *above* the highest layer).
+    3.  Sweep layers from **top (l = L-1) down to 0**, alternating horizontal
+        directions starting in the direction opposite to the canonical direction of mpo_ref†
+    4.  After computing a layer’s gate-wise environments, absorb the layer into
+        `E_top_cur` so that it becomes the new environment for the layer below.
+    5.  Assemble gradients in canonical order (layer-major, left→right) and
+        return them together with a (placeholder) loss proxy and metadata.
+    """
+    # I.  Book-keeping and pre-computation
+    dtype      = mpo_ref[0].dtype
+    n_sites    = mpo_ref.n_sites
+    mpo_ref_adj = mpo_ref.dagger()
+
+    # Bottom environments start from the identity MPO
+    all_E_bottom = compute_bottom_envs(
+        circuit,
+        max_bondim_env=max_bondim_env,
+        svd_cutoff=svd_cutoff,
+        init_sweep_dir="left_to_right",
+    )
+    # TODO: use init_horizontal_dir from utils
+
+    # Running top environment (above current layer)
+    E_top_cur = mpo_ref_adj
+    loss      = jnp.array(0.0)          # (still a stub – update if needed)
+
+    # Horizontal sweep convention
+    init_horizontal_dir = 'left_to_right' if mpo_ref_adj.is_right_canonical else 'right_to_left'
+
+    def dir_for_layer(l: int) -> str:
+        """Return L→R / R→L according to layer index parity."""
+        if l % 2 == 0:
+            return init_horizontal_dir
+        return "right_to_left" if init_horizontal_dir == "left_to_right" else "left_to_right"
+
+    all_grads_map: Dict[Gate, jnp.ndarray] = {}
+
+    # II. Layer loop: TOP → BOTTOM
+    for l in range(circuit.num_layers - 1, -1, -1):
+        print(f"    Layer {l}...")
+        layer            = circuit.layers[l]
+        E_bottom_l       = all_E_bottom[l]        # environment *below* layer l
+        sweep_dir        = dir_for_layer(l)
+
+        if sweep_dir == "left_to_right":
+            layer_grads  = _layer_pass_left_to_right(
+                layer, E_top_cur, E_bottom_l, n_sites, dtype
+            )
+        else:
+            layer_grads  = _layer_pass_right_to_left(
+                layer, E_top_cur, E_bottom_l, n_sites, dtype
+            )
+
+        all_grads_map.update(layer_grads)
+
+        # III. Update the running *top* environment by absorbing the layer
+        E_top_cur = contract_mpo_with_layer(
+            E_top_cur,
+            layer,
+            layer_is_below=True,        # layer sits *below* E_top_cur
+            direction=sweep_dir,
+            max_bondim=max_bondim_env,
+            svd_cutoff=svd_cutoff,
+        )
+
+    # IV. Collect gradients in canonical (layer-major) order
+    grads_ordered: List[jnp.ndarray] = []
+    for layer in circuit.layers:
+        for gate in layer.iterate_gates(reverse=False):
+            try:
+                grads_ordered.append(all_grads_map[gate])
+            except KeyError as err:
+                raise ValueError(
+                    f"Gradient missing for gate {gate} – "
+                    "check environment construction."
+                ) from err
+
+    info = {"num_gates": len(grads_ordered)}
+    return loss, grads_ordered, info
+
 
 def _layer_pass_right_to_left(    
     current_layer: GateLayer,        # <-- mutated in-place

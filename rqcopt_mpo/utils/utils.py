@@ -66,54 +66,46 @@ def layer_to_matrix(layer: GateLayer, n_sites: int) -> jnp.ndarray:
 
 def compute_init_horizontal_dir(mpo_ref_adj: MPO, num_layers: int) -> str:
     """
-    Computes the initial horizontal sweep direction based on the
-    canonical form of a reference MPO and the number of layers.
-
-    The logic is:
-    - If num_layers is even, the initial direction should be opposite
-      to the reference MPO's canonical direction.
-    - If num_layers is odd, the initial direction should be the same
-      as the reference MPO's canonical direction.
+    Computes the initial horizontal sweep direction for DMRG based on
+    the reference MPO's canonicalization and the number of layers.
 
     Args:
-        mpo_ref_adj (MPO): The reference MPO whose canonical form dictates the base direction.
-                           It should have `is_left_canonical` and `is_right_canonical` attributes.
-        num_layers (int): The number of layers involved.
+        mpo_ref_adj (MPO): The reference MPO, expected to be canonicalized.
+        num_layers (int): The number of layers in the MPO optimization.
 
     Returns:
-        str: The computed initial direction, either "left_to_right" or "right_to_left".
+        str: The initial sweep direction, either "left_to_right" or "right_to_left".
 
     Raises:
-        ValueError: If the reference MPO is not in a definite canonical form
-                    (neither or both flags are set).
-        ValueError: If num_layers is not a positive integer.
+        ValueError: If mpo_ref_adj is not in a definite canonical form or
+                    if num_layers is not a positive integer.
     """
     if not isinstance(num_layers, int) or num_layers <= 0:
         raise ValueError("num_layers must be a positive integer.")
 
-    # Determine the base direction from the reference MPO's canonical form
+    # Determine the reference MPO's canonical direction
     if mpo_ref_adj.is_left_canonical and not mpo_ref_adj.is_right_canonical:
-        base_direction = "left_to_right"
+        ref_direction = "left_to_right"
     elif mpo_ref_adj.is_right_canonical and not mpo_ref_adj.is_left_canonical:
-        base_direction = "right_to_left"
+        ref_direction = "right_to_left"
     else:
-        # Handles cases where is_left_canonical == is_right_canonical (both False or both True)
+        # Covers cases where both are True (scalar MPO, unlikely here),
+        # both are False (not canonicalized), or attributes are in an unexpected state.
         raise ValueError(
-            "Reference MPO (mpo_ref_adj) must be in a definite left- or right-canonical form. "
+            "mpo_ref_adj must be in a definite left- or right-canonical form. "
             f"Got is_left_canonical={mpo_ref_adj.is_left_canonical}, "
             f"is_right_canonical={mpo_ref_adj.is_right_canonical}."
         )
-
-    # Determine the initial direction based on layer parity
-    if num_layers % 2 == 0:  # Even number of layers
-        # Initial direction is opposite to the base direction
-        if base_direction == "left_to_right":
+    
+        # Determine the initial sweep direction based on parity of layers
+    if num_layers % 2 == 1:  # Odd number of layers
+        # Sweep direction needs to be opposite to the reference MPO's canonical direction
+        if ref_direction == "left_to_right":
             init_horizontal_dir = "right_to_left"
-        else:  # base_direction == "right_to_left"
+        else:  # ref_direction == "right_to_left"
             init_horizontal_dir = "left_to_right"
-    else:  # Odd number of layers
-        # Initial direction is the same as the base direction
-        init_horizontal_dir = base_direction
+    else:  # Even number of layers
+        # Sweep direction is the same as the reference MPO's canonical direction
+        init_horizontal_dir = ref_direction
 
     return init_horizontal_dir
-

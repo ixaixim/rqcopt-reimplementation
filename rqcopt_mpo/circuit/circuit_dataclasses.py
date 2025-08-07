@@ -170,9 +170,9 @@ class GateLayer:
 class Circuit:
     """Represents the entire quantum circuit structure."""
     n_sites: int
+    dtype: Any = jnp.complex128    # Optional: Add original circuit generation parameters if needed
     layers: List[GateLayer] = field(default_factory=list)
     
-    # Optional: Add original circuit generation parameters if needed
     hamiltonian_type: Optional[str] = None
     trotter_params: Optional[dict] = None # e.g., {'t': 0.1, 'n_repetitions': 2, ...}
 
@@ -187,6 +187,16 @@ class Circuit:
             for gate in layer.gates:
                 n += 1
         return n
+    
+    def __post_init__(self):
+        """ validation after initialization."""
+        # You could even add a check to ensure all gates match the circuit's dtype.
+        for layer in self.layers:
+            for gate in layer.gates:
+                if gate.matrix.dtype != self.dtype:
+                    print(f"Warning: Gate {gate.name} on qubits {gate.qubits} has dtype {gate.matrix.dtype}, "
+                          f"which differs from Circuit's dtype {self.dtype}.")
+
     
     def sort_layers(self):
         """Ensures layers are sorted by index."""
@@ -221,6 +231,7 @@ class Circuit:
 
         new_circuit = Circuit(
             n_sites=self.n_sites, # int is immutable
+            dtype=self.dtype,
             layers=copied_layers,
             hamiltonian_type=self.hamiltonian_type, # str is immutable
             trotter_params=copied_trotter_params
@@ -229,8 +240,7 @@ class Circuit:
     
     def to_matrix(self) -> jnp.ndarray:
         self.sort_layers()
-        total_circuit_matrix = jnp.eye(2**self.n_sites)
-        dtype = self.layers[0].gates[0].matrix.dtype 
+        total_circuit_matrix = jnp.eye(2**self.n_sites, dtype=self.dtype)
         
         for layer in reversed(self.layers):
 
@@ -245,13 +255,13 @@ class Circuit:
                 if gate_list_iter_idx < len(sorted_gates_in_layer):
                     gate = sorted_gates_in_layer[gate_list_iter_idx]
                     if gate.qubits[0] == current_q_idx: 
-                        ops_for_kron_product.append(jnp.array((gate.matrix), dtype=dtype))
+                        ops_for_kron_product.append(jnp.array((gate.matrix), dtype=self.dtype))
                         current_q_idx += len(gate.qubits) # Advance by the number of qubits in the gate
                         gate_list_iter_idx += 1
                         is_identity_for_site = False
 
                 if is_identity_for_site:
-                    ops_for_kron_product.append(jnp.eye(2, dtype=dtype)) # Identity for this site
+                    ops_for_kron_product.append(jnp.eye(2, dtype=self.dtype)) # Identity for this site
                     current_q_idx += 1
 
             # Build the full layer matrix from the collected ops
