@@ -21,11 +21,13 @@ dtype = jnp.complex128
 target_is_normalized = True
 
 # optimization params
-lr: float = 1e-3,
-betas: tuple = (0.9, 0.999),
-eps: float = 1e-8,
-clip_grad_norm: float = None,
-max_steps: int = 1000,
+lr = 1e-3
+betas = (0.9, 0.999)
+eps = 1e-8
+clip_grad_norm = None
+max_steps = 5
+max_bondim_env = 128
+svd_cutoff = 0.0
 
 # set up target MPO from benchmark Trotter circuit
 target_circ = trotterized_heisenberg_circuit(    
@@ -33,7 +35,7 @@ target_circ = trotterized_heisenberg_circuit(
     order=4, dt=dt, reps=reps,
     dtype=dtype
 )
-target_circ.print_gates()
+# target_circ.print_gates()
 target_mpo = circuit_to_mpo(target_circ)
 if target_is_normalized: 
     target_mpo.normalize()
@@ -47,9 +49,9 @@ init_circ = trotterized_heisenberg_circuit(
     dt=dt,
     reps=reps,
     order=2,
-    dtype=jnp.complex128,
+    dtype=dtype,
 )
-
+init_circ.print_gates()
 #run optimization
 print("Optimizing Benchmark Trotter Circuit")
 
@@ -57,10 +59,12 @@ print("Optimizing Benchmark Trotter Circuit")
 loss = optimize(init_circ, target_mpo,
          lr=lr, betas=betas, eps=eps,
          clip_grad_norm=clip_grad_norm, 
-         max_steps=max_steps)
+         max_steps=max_steps,
+         max_bondim_env=max_bondim_env,
+         svd_cutoff=svd_cutoff)
 
 # save loss data for plotting
 base_dir = here = Path(__file__).resolve().parent
-save_data_npz(base_dir, 'loss_vanilla_circ', loss)
+save_data_npz(base_dir, 'loss_riemannian', loss)
 
 

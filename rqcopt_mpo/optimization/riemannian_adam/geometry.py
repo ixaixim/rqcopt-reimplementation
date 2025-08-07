@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Tuple, Optional
 
 
-import jax as jnp
+import jax.numpy as jnp
 from jax.numpy.linalg import eigh
 
 #TODO: have a __init__ file that imports jax.

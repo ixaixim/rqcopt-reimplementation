@@ -113,10 +113,10 @@ from rqcopt_mpo.optimization.gradient import sweeping_euclidean_gradient_top_dow
 # --------------------------------------------------------------------
 # Pytest for sweeping_euclidean_gradient_top_down
 # --------------------------------------------------------------------
-@pytest.mark.parametrize(
-    "n_sites, n_layers_init, n_layers_target",
-    [(5, 10, 5)],
-)
+
+@pytest.mark.parametrize("n_sites, n_layers_init, n_layers_target", [
+    (5, 10, 4),
+])
 def test_top_down_matches_numeric(
     n_sites, n_layers_init, n_layers_target
 ):
@@ -197,3 +197,85 @@ def test_top_down_matches_numeric(
 
     # ensure all gates were checked
     assert k == info["num_gates"]
+
+
+
+def setup_circ_and_mpo(n_sites, n_layers_init, n_layers_target, seed_init, seed_target):
+    target = generate_random_circuit(
+        n_sites=n_sites,
+        n_layers=n_layers_target,
+        p_single=0.3,
+        p_two=0.3,
+        seed=seed_target,
+        gate_name_single="U1",
+        gate_name_two="U2",
+        dtype=jnp.complex128,
+    )
+    target.sort_layers()
+    mpo_target = circuit_to_mpo(target)
+    mpo_target.left_canonicalize()      # ensures good conditioning
+
+    # --- init circuit (to be differentiated) ---
+    init = generate_random_circuit(
+        n_sites=n_sites,
+        n_layers=n_layers_init,
+        p_single=0.3,
+        p_two=0.3,
+        seed=seed_init,
+        gate_name_single="U1",
+        gate_name_two="U2",
+        dtype=jnp.complex128,
+    )
+    init.sort_layers()
+    return init, mpo_target
+
+@pytest.mark.parametrize(
+    "gradient_function",
+    [sweeping_euclidean_gradient_bottom_up, sweeping_euclidean_gradient_top_down]
+)
+@pytest.mark.parametrize(
+    "n_sites, n_layers_init, n_layers_target, seed_init, seed_target",
+    [(5, 10, 4, 42, 44)],
+)
+def test_trace_calculation(
+    gradient_function,
+    n_sites,
+    n_layers_init,
+    n_layers_target,
+    seed_init,
+    seed_target,
+):
+    """
+    Tests that the trace (loss) is computed correctly by comparing the result
+    from sweeping functions against a ground truth from dense matrix contraction.
+    """
+    circuit, mpo_ref = setup_circ_and_mpo(
+        n_sites=n_sites,
+        n_layers_init=n_layers_init,
+        n_layers_target=n_layers_target,
+        seed_init=seed_init,
+        seed_target=seed_target,
+    )
+
+    # ground-truth trace
+    trace_exact = jnp.trace(mpo_ref.dagger().to_matrix() @ circuit.to_matrix())
+
+    # calculation using the sweeping algorithm
+    trace_num, _, _ = gradient_function(        
+        circuit=circuit,
+        mpo_ref=mpo_ref,
+        max_bondim_env=128, 
+        svd_cutoff=1e-14
+    )
+
+    print(f"\nTesting trace for {gradient_function.__name__}:")
+    print(f"  Trace from sweep: {trace_num}")
+    print(f"  Exact trace:      {trace_exact}")
+    
+    np.testing.assert_allclose(
+        trace_num,
+        trace_exact,
+        rtol=1e-6,
+        atol=1e-10,
+        err_msg=f"Trace calculation failed for {gradient_function.__name__}"
+    )
