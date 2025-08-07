@@ -6,9 +6,10 @@ from typing import Optional, Dict, List, Tuple
 from rqcopt_mpo.utils.utils import gate_map
 from rqcopt_mpo.circuit.circuit_dataclasses import Gate, GateLayer, Circuit
 from rqcopt_mpo.mpo.mpo_dataclass import MPO
+from rqcopt_mpo.mpo.mpo_builder import get_id_mpo
 from rqcopt_mpo.tensor_network.core_ops import contract_mpo_with_layer
 import jax
-
+from rqcopt_mpo.utils.utils import compute_init_horizontal_dir 
 
 # ---------------------------------------------------------------------
 # 1.  SMALL, RE-USABLE HELPER
@@ -297,7 +298,7 @@ def compute_gate_environment_tensor(
     else:
         raise ValueError(f"Unsupported number of gate qubits: {num_qubits}. Expected 1 or 2.")
     
-    environment_tensor = environment_tensor.conj() 
+    # environment_tensor = environment_tensor.conj()
     return environment_tensor
 
 
@@ -395,7 +396,8 @@ def compute_upper_lower_environments(
     if direction == 'bottom':
         all_E_bot: Dict[int, MPO] = {}
 
-        E_bot_current = mpo_ref # should be an id MPO
+        #NOTE: dangerous! instantiate id MPO directly.
+        E_bot_current = mpo_ref # should be an id MPO 
         all_E_bot = {0: E_bot_current} # Layer 0 bottom Env is initialized.
         print(f"    Stored E_bot[0]")
 
@@ -422,3 +424,318 @@ def compute_upper_lower_environments(
 
 
         return all_E_bot
+
+def compute_top_envs(
+    circuit: Circuit,
+    mpo_ref_top: MPO,
+    *,
+    max_bondim_env: int,
+    svd_cutoff: float,
+    init_sweep_dir: str,
+) -> Dict[int, MPO]:
+    """
+    Wrapper
+    Precompute only the *top* environments E_top[l] (sitting above layer l), no bottoms.
+    """
+    print("  Computing Top Environments...")
+    all_E_top = compute_upper_lower_environments(
+        mpo_ref=mpo_ref_top, circuit=circuit, direction='top',
+        init_direction=init_sweep_dir,
+        max_bondim_env=max_bondim_env, svd_cutoff=svd_cutoff
+    )
+    return all_E_top
+
+
+def sweeping_euclidean_gradient_bottom_up(
+    circuit: Circuit,
+    mpo_ref: MPO,                     # usually V^† or the “top” MPO you already use
+    *,
+    max_bondim_env: int,
+    svd_cutoff: float = 1e-12,
+) -> Tuple[jnp.ndarray, List[jnp.ndarray], Dict[str, int]]:
+    """
+    Computes the Euclidean gradient of the loss function Tr(V_ref^adj U_circuit)
+    with respect to all gates in the circuit using a structured sweeping approach.
+
+    This function performs a single bottom-to-top pass over the circuit layers.
+    For each layer, it sweeps horizontally (left-to-right or right-to-left) to
+    compute gradients for all gates within that layer *without* updating the gates.
+    The environment "below" (E_bottom) is updated after processing each layer.
+
+    The loss value returned is a proxy based on intermediate contractions and
+    might not represent the full final loss. The primary output is the list of gradients.
+    Strategy:
+      1. Precompute E_top[l] environments for all layers using a top-down pass.
+         The sweep direction for this is determined by the canonical form of `mpo_ref_adj`.
+      2. Initialize E_bottom to the identity MPO.
+      3. Loop through layers from bottom (l=0) to top (l=num_layers-1):
+         a. Determine the horizontal sweep direction for the current layer `l`.
+            This alternates starting from an initial direction computed based on
+            `mpo_ref_adj`'s canonical form and the number of layers.
+         b. Perform a horizontal sweep (left-to-right or right-to-left) on the layer:
+             - Compute the necessary single-site boundary environment for the sweep direction.
+             - Iterate through gates in the sweep order, accumulating gradients.
+             - Update the running E_bottom MPO by contracting it with the current layer's gates.
+      4. Assemble the computed gradients into a canonical order (layer-major, gate-left-to-right).
+
+    Args:
+        circuit (Circuit): The quantum circuit for which to compute gradients.
+        mpo_ref (MPO): The reference MPO (e.g., the target V_target).
+        max_bondim_env (int): The maximum bond dimension for environment MPO truncation.
+        svd_cutoff (float, optional): The cutoff for SVD truncation when compressing
+                                      environment MPOs. Defaults to 1e-12.
+
+    Returns:
+        Tuple[jnp.ndarray, List[jnp.ndarray], Dict[str, int]]:
+            - loss_scalar (jnp.ndarray): A scalar loss value (Note: likely a proxy, check implementation).
+            - grads_ordered (List[jnp.ndarray]): A list of gradient arrays for gates,
+              ordered canonically (layer 0 gates left-to-right, then layer 1 gates, etc.).
+              Each gradient array corresponds to a gate's parameters.
+            - info (Dict[str, int]): A dictionary containing metadata, e.g.,
+            """
+    # TODO: make sure that you are NOT storing unnecessary envs.
+    # i.e. only store Env_bottom_current and Env_bottom_current-1
+            # if current_dir = left to right, only store Env_left_current and Env_left_current-1
+    
+    # I. Compute all top environments + loss
+    ## init
+    dtype = mpo_ref[0].dtype
+    n_sites = mpo_ref.n_sites
+    mpo_ref_adj = mpo_ref.dagger()
+    mpo_identity = get_id_mpo(circuit.n_sites, dtype=dtype)
+    E_bottom_cur = mpo_identity
+
+    
+    loss = jnp.array(0.0) # TODO: update loss
+    all_E_top = compute_top_envs(
+        circuit, mpo_ref_adj,
+        max_bondim_env=max_bondim_env, svd_cutoff=svd_cutoff,
+        init_sweep_dir=('left_to_right' if mpo_ref_adj.is_right_canonical else 'right_to_left')
+    )
+
+    all_grads_map: Dict[Gate, jnp.ndarray] = {}
+
+    init_horizontal_dir = compute_init_horizontal_dir(mpo_ref_adj, circuit.num_layers)
+    
+    # II. Layer loop: bottom-up, alternate right/left pass.
+    def dir_for_layer(l: int) -> str:
+        if init_horizontal_dir not in ('left_to_right', 'right_to_left'):
+            raise ValueError("init_horizontal_dir must be 'left_to_right' or 'right_to_left'")
+        if l % 2 == 0:
+            return init_horizontal_dir
+        return 'right_to_left' if init_horizontal_dir == 'left_to_right' else 'left_to_right'
+    
+    for l in range(circuit.num_layers):
+        print(f"    Layer {l}...")
+        layer: GateLayer = circuit.layers[l]
+        E_top_l    = all_E_top[l]
+        sweep_dir  = dir_for_layer(l)
+
+            # TODO: this can easily be another function, since it is repeated in the analogous top-down function
+            #       will call this: sweeping_euclidean_gradient_left_to_right is a wrapper to sweep_left_to_right
+        if sweep_dir == 'left_to_right':
+            layer_grads_map = _layer_pass_left_to_right(layer, E_top_l, E_bottom_cur, n_sites, dtype)
+        elif sweep_dir == 'right_to_left':
+            layer_grads_map = _layer_pass_right_to_left(layer, E_top_l, E_bottom_cur, n_sites, dtype)
+        
+        # aggregate the layer's gradients into the master map.
+        all_grads_map.update(layer_grads_map)
+
+    # III. Contract MPO with layer: update E_bottom
+
+        # After finishing layer l: update bottom env ONCE and store it
+        E_bottom_cur = contract_mpo_with_layer(
+            E_bottom_cur, layer, layer_is_below=False,
+            direction=sweep_dir, max_bondim=max_bondim_env, svd_cutoff=svd_cutoff
+        )
+    
+    # Assemble grads in a STABLE canonical order (layer-major, left→right)
+    grads_ordered: List[jnp.ndarray] = []
+    for layer in circuit.layers:
+        for gate in layer.iterate_gates(reverse=False):
+            if gate in all_grads_map:
+                grads_ordered.append(all_grads_map[gate])
+            else: 
+                raise ValueError(f"No gradient found for gate: {gate}. "
+                                f"Check if it was excluded or if gradient computation failed.")
+    #         continue
+    #     grads_ordered.append(grads_dict[(l, gidx)])
+
+    info: Dict[str, int] = {
+        "num_gates": len(grads_ordered), # placeholder info
+    }
+    return loss, grads_ordered, info
+
+# TODO: make sure not to store unnecessary tensors.
+# TODO: if the gates have different shapes, they need to be collected in buckets, instead of being stacked on each other.
+def _layer_pass_left_to_right(    
+    current_layer: GateLayer,        # <-- mutated in-place
+    E_top_l: MPO,
+    E_bottom_current: MPO,
+    n_sites: int,
+    dtype: jnp.dtype,
+) -> Dict[Gate, jnp.ndarray]: # what should I return? a dict of some sort (key: gate_id, value: Env):
+    """
+    Sweeps left-to-right across a layer, computing the gradient for each gate.
+    
+    Returns:
+        A dictionary mapping each Gate object in the layer to its
+        gradient tensor (the environment tensor, Env).
+    """
+    layer_gradients: Dict[Gate, jnp.ndarray] = {}
+
+    print("      L->R Pass...")
+
+    E_right_boundaries = compute_layer_boundary_environments(
+        E_top_l, E_bottom_current, current_layer, side="right"
+    )
+    E_left_current = jnp.eye(1, dtype=dtype)
+
+    current_site = 0 # cursor tracking left env position
+    gate_to_idx_map = {id(g): i for i, g in enumerate(current_layer.gates)}
+
+    for gate in current_layer.iterate_gates(reverse=False):
+
+        # Filling the "gap" between the current site and the next gate by propagating the environment with identity operators.
+        gap_start_site = current_site
+        gap_end_site = gate.qubits[0]
+        for site_i in range(gap_start_site, gap_end_site):
+            E_left_current, _ = _update_left_env(
+                E_left_current,
+                E_top_l[site_i], E_bottom_current[site_i],
+            )
+        current_site = gap_end_site # Move cursor to the start of the gate
+
+        # gate is present. Gather its right environment and build Env
+        rightmost_qb = max(gate.qubits)
+        E_right_current = E_right_boundaries[rightmost_qb]
+        if E_right_current is None:
+            print(f"Error: Missing right-hand env for gate ending at {rightmost_qb}.")
+            current_site += (2 if gate.is_two_qubit() else 1)
+            continue
+
+        Env = compute_gate_environment_tensor(
+            gate.qubits,
+            E_top_l, E_bottom_current,
+            E_left_current, E_right_current
+        )
+        layer_gradients[gate] = Env
+
+        # update left_env
+        if gate.is_two_qubit():
+            E_left_current, step = _update_left_env(
+                E_left_current,
+                E_top_l[current_site], E_bottom_current[current_site],
+                gate,
+                E_top_l[rightmost_qb], E_bottom_current[rightmost_qb]
+            )
+        else: # single-qubit gate
+            E_left_current, step = _update_left_env(
+                E_left_current,
+                E_top_l[current_site], E_bottom_current[current_site],
+                gate
+            )
+        
+        # advance the current cursor past the processed gate:
+        current_site += step
+
+    return layer_gradients
+
+def _layer_pass_right_to_left(    
+    current_layer: GateLayer,        # <-- mutated in-place
+    E_top_l: MPO,
+    E_bottom_current: MPO,
+    n_sites: int,
+    dtype: jnp.dtype,
+) -> Dict[Gate, jnp.ndarray]:
+    """
+    Sweeps right-to-left across a layer, computing the gradient for each gate.
+
+    Returns:
+        A dictionary mapping each Gate object in the layer to its
+        gradient tensor (the environment tensor, Env).
+    """
+    layer_gradients: Dict[Gate, jnp.ndarray] = {}
+
+    print("      R->L Pass...")
+
+    # For an R->L sweep we need, for each gate, the *left* boundary env
+    # at its starting site, and we propagate a running *right* env.
+    E_left_boundaries = compute_layer_boundary_environments(
+        E_top_l, E_bottom_current, current_layer, side="left"
+    )
+    E_right_current = jnp.eye(1, dtype=dtype)
+
+    current_site = n_sites - 1  # cursor tracking right env position
+
+    for gate in current_layer.iterate_gates(reverse=True):
+        leftmost_qb = min(gate.qubits)
+        rightmost_qb = max(gate.qubits)
+
+        # Fill the "gap" between the current site and the next gate (to the left)
+        # by propagating the environment with identity operators.
+        gap_start_site = current_site
+        gap_end_site = rightmost_qb
+        for site_i in range(gap_start_site, gap_end_site, -1):
+            # propagate one site to the left (no gate)
+            E_right_current, _ = _update_right_env(
+                E_right_current,
+                E_top_l[site_i], E_bottom_current[site_i],
+            )
+        current_site = gap_end_site  # Move cursor to the *end* of the gate
+
+        # gate is present. Gather its left environment and build Env
+        E_left_current = E_left_boundaries[leftmost_qb]
+        if E_left_current is None:
+            print(f"Error: Missing left-hand env for gate starting at {leftmost_qb}.")
+            # Advance cursor past the gate and continue
+            current_site += (-2 if gate.is_two_qubit() else -1)
+            continue
+
+        Env = compute_gate_environment_tensor(
+            gate.qubits,
+            E_top_l, E_bottom_current,
+            E_left_current, E_right_current
+        )
+        layer_gradients[gate] = Env
+
+        # Update the running *right* environment by absorbing the gate region
+        if gate.is_two_qubit():
+            # For _update_right_env, A1/B1 correspond to site i=current_site (rightmost),
+            # and A0/B0 correspond to the left neighbor (leftmost_qb).
+            E_right_current, step = _update_right_env(
+                E_right_current,
+                E_top_l[current_site], E_bottom_current[current_site],
+                gate,
+                E_top_l[leftmost_qb], E_bottom_current[leftmost_qb]
+            )
+        else:  # single-qubit gate
+            E_right_current, step = _update_right_env(
+                E_right_current,
+                E_top_l[current_site], E_bottom_current[current_site],
+                gate
+            )
+
+        # step is negative (-1 or -2). Move cursor left past the processed gate.
+        current_site += step
+
+    return layer_gradients
+
+# def cost_and_euclidean_grad(
+#     circuit: Circuit,
+#     mpo_ref: MPO,                     # usually V^† or the “top” MPO you already use
+#     *,
+#     max_bondim_env: int,
+#     svd_cutoff: float = 1e-12,
+#     init_horizontal_dir: str = 'left_to_right',  # layer-0 direction; alternate per layer
+#     vertical_sweep: str,
+# ):
+#     # depending on vertical direction:
+#     if vertical_sweep == 'bottom-up':
+#         # does a bottom-up sweep
+#         loss, grad_e = sweeping_euclidean_gradient_bottom_up(circuit, mpo_ref_top=mpo_ref, 
+#                                                              max_bondim_env=max_bondim_env, svd_cutoff=svd_cutoff, init_horizontal_dir=init_horizontal_dir) # TODO: place params
+#     else:
+#         # does a top-down sweep
+#         # sweeping_euclidean_gradient_top_down() #TODO: put parameters
+#     return loss, grad_e

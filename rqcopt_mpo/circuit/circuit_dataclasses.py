@@ -3,7 +3,7 @@ import rqcopt_mpo.jax_config
 from dataclasses import dataclass, field
 import numpy as np
 import jax.numpy as jnp
-from typing import Tuple, Optional, Any, List, Dict, Set
+from typing import Tuple, Optional, Any, List, Dict, Set, Iterator
 import copy
 import jax
 
@@ -120,7 +120,27 @@ class GateLayer:
     gates: List[Gate] = field(default_factory=list) # All gates conceptually in this layer
     n_sites: Optional[int] = None
     # TODO: add __post_init__ method to check that the gates in layer can be computed in parallel (i.e. no overlapping gates on the same qubits) 
-     
+
+    def iterate_gates(self, reverse: bool = False) -> Iterator[Gate]:
+        """
+        Provides an iterator over the gates in the layer, sorted spatially.
+
+        This is the recommended way to iterate for MPO/TEBD algorithms.
+        The sorting key `g.qubits[0]` correctly orders gates based on their
+        "leftmost" qubit index, naturally handling both 1- and 2-qubit gates.
+
+        Args:
+            reverse: If False, iterates from left-to-right (ascending qubit index).
+                     If True, iterates from right-to-left (descending qubit index).
+
+        Yields:
+            Gate objects in the specified spatial order.
+        """
+        # Sort the gates based on the index of their first qubit.
+        # This provides a consistent spatial ordering from left to right.
+        sorted_gates = sorted(self.gates, key=lambda g: g.qubits[0], reverse=reverse)
+        yield from sorted_gates
+
     def add_gate(self, gate: Gate):
         if gate.layer_index != self.layer_index:
              # You might want a warning or error here depending on strictness

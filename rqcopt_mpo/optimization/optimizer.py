@@ -11,9 +11,8 @@ from rqcopt_mpo.optimization.gradient import compute_layer_boundary_environments
 from rqcopt_mpo.optimization.utils import global_loss
 import jax
 
-# TODO: create a compute_full_bottom_environment function. to place in gradient.py, instead of doing it optimizer.py
-
-# TODO: cleaner code would never let gate == None, if there is no gate at a site. Cleaner code would just use a single qubit identity gate. Then we can drop the None handling. 
+# TODO: cleaner code would never let gate == None, if there is no gate at a site. 
+#       Cleaner code would just use a single qubit identity gate. Then we can drop the None handling. 
 #       This and lengthy syntax could be avoided if we had an iterator on the layer gates.
 def optimize_circuit_local_svd(
     circuit_initial: Circuit,
@@ -259,7 +258,7 @@ def _layer_pass_left_to_right(
             E_top_l, E_bottom_current,
             E_left_current,                     # already accumulated left env
             E_right_current                     # pre-computed right env
-        )
+        ).conj()
 
         # ──────────────────────────────────────────────────────────────────
         # 3c.  SVD-based polar-project update  (same recipe as R→L pass)
@@ -353,7 +352,7 @@ def _layer_pass_right_to_left(
 
             Env = compute_gate_environment_tensor(
                 qubits, E_top_l, E_bottom_current, E_left_current, E_right_current
-            )
+            ).conj()
             # Env tensor dimensions are assumed: (in_0, in_1, ..., out_0, out_1, ...)
             env_ndim = Env.ndim
             out_indices_shape = Env.shape[env_ndim//2:] # Shape of output physical legs (for the 'ket' part of the gate matrix)

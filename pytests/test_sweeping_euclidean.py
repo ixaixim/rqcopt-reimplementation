@@ -1,0 +1,107 @@
+import numpy as np
+import jax.numpy as jnp
+import pytest
+
+from rqcopt_mpo.circuit.circuit_builder import generate_random_circuit
+from rqcopt_mpo.mpo.mpo_builder import circuit_to_mpo, get_id_mpo
+from rqcopt_mpo.optimization.gradient import sweeping_euclidean_gradient_bottom_up
+
+# --------------------------------------------------------------------
+# Helpers: numeric Wirtinger derivatives
+# --------------------------------------------------------------------
+def grad_G(f, G0, h: float = 1e-6):
+    """
+    4-point centered FD for Wirtinger ∂f/∂G at G0.
+    """
+    E_num = jnp.zeros_like(G0)
+    for idx in np.ndindex(*G0.shape):
+        delta = jnp.zeros_like(G0).at[idx].set(1.0)
+        fp  = f(G0 +      h * delta)
+        fm  = f(G0 -      h * delta)
+        fip = f(G0 + 1j * h * delta)
+        fim = f(G0 - 1j * h * delta)
+        deriv = ((fp - fm) - 1j * (fip - fim)) / (4.0 * h)
+        E_num = E_num.at[idx].set(deriv)
+    return E_num
+
+# no need to test ∂/∂G* here; bottom-up expects holomorphic
+
+# --------------------------------------------------------------------
+# Pytest test for sweeping_euclidean_gradient_bottom_up
+# --------------------------------------------------------------------
+@pytest.mark.parametrize("n_sites, n_layers_init, n_layers_target", [
+    (5, 10, 4),
+])
+def test_sweeping_euclidean_matches_numeric(n_sites, n_layers_init, n_layers_target):
+    seed_init = 42
+    seed_target = 44
+
+    # Generate target and initial circuits
+    target = generate_random_circuit(
+        n_sites=n_sites,
+        n_layers=n_layers_target,
+        p_single=0.3,
+        p_two=0.3,
+        seed=seed_target,
+        gate_name_single='U1',
+        gate_name_two='U2',
+        dtype=jnp.complex128
+    )
+    target.sort_layers()
+    target.print_gates()
+    mpo_target = circuit_to_mpo(target)
+    mpo_target.left_canonicalize()
+
+    init = generate_random_circuit(
+        n_sites=n_sites,
+        n_layers=n_layers_init,
+        p_single=0.3,
+        p_two=0.3,
+        seed=seed_init,
+        gate_name_single='U1',
+        gate_name_two='U2',
+        dtype=jnp.complex128
+    )
+    init.sort_layers()
+    init.print_gates()
+
+    # Call bottom-up sweep
+    loss, grads_ordered, info = sweeping_euclidean_gradient_bottom_up(
+        circuit=init,
+        mpo_ref=mpo_target,
+        max_bondim_env=128,
+        svd_cutoff=1e-12,
+    )
+
+    # Sanity checks
+    assert info['num_gates'] == len(grads_ordered)
+    assert isinstance(loss, jnp.ndarray)
+
+    # Now compare each grad with numeric Wirtinger
+    k = 0
+    for layer_idx, layer in enumerate(init.layers):
+        for gate_idx, gate in enumerate(layer.gates):
+            G0 = gate.matrix
+            # Define f: trace(target^† U(init with displaced gate))
+            def f(displaced_gate):
+                tmp = init.copy()
+                tmp.layers[layer_idx].gates[gate_idx].matrix = displaced_gate
+                U_mat = tmp.to_matrix()
+                return jnp.trace(mpo_target.dagger().to_matrix() @ U_mat)
+
+            E_num = grad_G(f, G0, h=1e-6)
+            E_sweep = grads_ordered[k]
+
+            # Reshape if two-qubit gate
+            if gate.is_two_qubit():
+                E_num = E_num.reshape(E_sweep.shape)
+
+            # Compare
+            assert jnp.allclose(E_sweep, E_num, rtol=1e-4, atol=1e-8), (
+                f"Mismatch at gate {k} (layer {gate.layer_index}): "
+                f"max|Δ| = {jnp.max(jnp.abs(E_sweep - E_num)):.2e}"
+            )
+            k += 1
+
+    # Ensure we tested all gates
+    assert k == info['num_gates']

@@ -17,7 +17,7 @@ import jax
 # 1. 4-point centred finite difference for the Wirtinger derivative
 #    ∂f/∂G
 # --------------------------------------------------------------------
-def numeric_env(f, G0, h: float = 1e-6):
+def grad_G(f, G0, h: float = 1e-6):
     """
     Finite-difference approximation of the Wirtinger gradient
     E_num ≈ ∂f / ∂G evaluated at G = G0.
@@ -52,7 +52,7 @@ def numeric_env(f, G0, h: float = 1e-6):
 
     return E_num
 
-def numeric_env_conj(f, G0, h: float = 1e-6):
+def grad_G_conj(f, G0, h: float = 1e-6):
     """
     Finite-difference approximation of the Wirtinger gradient
     E_num ≈ ∂f / ∂G* evaluated at G = G0.
@@ -174,7 +174,7 @@ for layer_ind in range(init_circuit.num_layers):
             E_bottom_layer=E_bot[layer_ind],
             E_left_boundary=E_left[q0],
             E_right_boundary=E_right[q1]
-        ).conj()
+        )
 
         if len(gate.qubits) == 2:
             E_anal = E_anal.reshape(4,4)
@@ -183,7 +183,7 @@ for layer_ind in range(init_circuit.num_layers):
         # compute the numerical derivative
         def f(displaced_gate):
             # replaces circuit gate at the current position with displaced_gate. 
-            # displaced_gate differs by gate by a displacement (see numeric_env)
+            # displaced_gate differs by gate by a displacement (see grad_G)
             # calculates the final trace Tr(W^ref U_circuit)
             temp_circuit = init_circuit.copy()
             new_gate = temp_circuit.layers[layer_ind].gates[gate_idx].copy()
@@ -193,8 +193,8 @@ for layer_ind in range(init_circuit.num_layers):
             return np.trace(target_mpo_dag.to_matrix() @ init_matrix)
         # contract to get the trace
         G0 = gate.matrix
-        E_num  = numeric_env(f, G0, h=1e-6)
-        E_num_conj = numeric_env_conj(f, G0, h=1e-6)
+        E_num  = grad_G(f, G0, h=1e-6)
+        E_num_conj = grad_G_conj(f, G0, h=1e-6)
 
         # test holomorphic assumption
         print("Holomorphic check: d/dz^conj f = 0")
