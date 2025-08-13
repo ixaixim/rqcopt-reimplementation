@@ -75,50 +75,54 @@ def generate_random_circuit(
     circuit = Circuit(n_sites=n_sites)          # empty circuit container
 
     for layer_idx in range(n_layers):
-        gates = []
-        site = 0
-        while site < n_sites:
-            # determine gate type on this site
-            if site == n_sites - 1:            # last qubit: can't host a 2‑qubit gate
-                probs = [p_single, 0.0, 1.0 - p_single]   # [single, two, none]
-            else:
-                probs = [p_single, p_two, 1.0 - p_single - p_two]
-            choice = rng.choice(["single", "two", "none"], p=probs)
+        while True:
+            gates = []
+            site = 0
+            while site < n_sites:
+                # determine gate type on this site
+                if site == n_sites - 1:            # last qubit: can't host a 2‑qubit gate
+                    probs = [p_single, 0.0, 1.0 - p_single]   # [single, two, none]
+                else:
+                    probs = [p_single, p_two, 1.0 - p_single - p_two]
+                choice = rng.choice(["single", "two", "none"], p=probs)
 
-            if choice == "single":
-                matrix = _random_unitary(2, key=key_pool[key_index], dtype=dtype)           # shape (2,2)
-                gates.append(
-                    Gate(
-                        matrix=matrix,
-                        qubits=(site,),
-                        layer_index=layer_idx,
-                        name=gate_name_single,
-                        params=(),
-                        original_gate_qubits=None,
-                        decomposition_part="full",
+                if choice == "single":
+                    matrix = _random_unitary(2, key=key_pool[key_index], dtype=dtype)           # shape (2,2)
+                    gates.append(
+                        Gate(
+                            matrix=matrix,
+                            qubits=(site,),
+                            layer_index=layer_idx,
+                            name=gate_name_single,
+                            params=(),
+                            original_gate_qubits=None,
+                            decomposition_part="full",
+                        )
                     )
-                )
-                site += 1
-            elif choice == "two":
-                matrix = _random_unitary(4, key=key_pool[key_index], dtype=dtype)
-                gates.append(
-                    Gate(
-                        matrix=matrix,
-                        qubits=(site, site + 1),
-                        layer_index=layer_idx,
-                        name=gate_name_two,
-                        params=(),
-                        original_gate_qubits=None,
-                        decomposition_part="full",
+                    site += 1
+                elif choice == "two":
+                    matrix = _random_unitary(4, key=key_pool[key_index], dtype=dtype)
+                    gates.append(
+                        Gate(
+                            matrix=matrix,
+                            qubits=(site, site + 1),
+                            layer_index=layer_idx,
+                            name=gate_name_two,
+                            params=(),
+                            original_gate_qubits=None,
+                            decomposition_part="full",
+                        )
                     )
-                )
-                site += 2                                # skip neighbour (now part of this gate)
-            else:  # "none"
-                site += 1
+                    site += 2                                # skip neighbour (now part of this gate)
+                else:  # "none"
+                    site += 1
 
-            key_index += 1
+                key_index += 1
             
+            if gates: # break only if non-empty
+                break
 
+                
         circuit.layers.append(
             GateLayer(
                 layer_index=layer_idx,

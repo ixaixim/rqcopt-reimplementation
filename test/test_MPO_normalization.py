@@ -1,3 +1,4 @@
+# STATUS: PORTED TO PYTEST
 # test whether the MPO is fully normalized. 
 import rqcopt_mpo.jax_config
 
@@ -31,6 +32,7 @@ print("Converting target circuit to MPO...")
 U = circuit_to_mpo(U_circuit, svd_cutoff=0.0) 
 U.left_canonicalize()
 U.normalize()
+U.print_tensors()
 
 U_dag = U.dagger()
 L_env = jnp.eye(1).reshape(1,1)
