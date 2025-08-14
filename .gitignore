@@ -175,3 +175,6 @@ run/heisenberg/results/
 run/heisenberg/model_list.txt
 scratchpad.txt
 
+*.png
+*.txt
+*.npz
