@@ -27,7 +27,7 @@ target_circuit.print_gates()
 target_mpo = circuit_to_mpo(target_circuit)
 target_mpo.left_canonicalize()
 # norm = target_mpo.normalize()
-# print(f'Target norm = {norm}')
+# print(f'Old Target norm = {norm}')
 
 # initialize circuit 
 # order 2, 2 reps,  same dt.
@@ -45,11 +45,14 @@ init_circuit.print_gates()
 
 _, loss = optimize_circuit_local_svd(
     circuit_initial=init_circuit, mpo_ref=target_mpo, 
-    num_sweeps=10, layer_update_passes=1, 
+    num_sweeps=5, layer_update_passes=1, 
     max_bondim_env=128, svd_cutoff=0.0,
     )
 
-loss_hst = 1 - 1/2**(2*n_sites) * np.abs(loss)**2
+if target_mpo.is_normalized:
+    loss_hst = 1 - 1/2**(n_sites) * np.abs(loss)**2
+else: 
+    loss_hst = 1 - 1/2**(2*n_sites) * np.abs(loss)**2
 # if jnp.allclose(jnp.array(loss_hst), 0, atol=1e-12):
 #     print("Result is close to zero within atol=1e-12.")
 # else:

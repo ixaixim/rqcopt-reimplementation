@@ -1,3 +1,4 @@
+# STATUS: ported to pytest
 # verify how the HIlbert Schmidt scalar product is computed in practice when A and B are MPOs instead of matrices. 
 import rqcopt_mpo.jax_config
 

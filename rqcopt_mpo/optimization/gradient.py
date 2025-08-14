@@ -267,7 +267,7 @@ def compute_gate_environment_tensor(
         # Check bounds
         if not (0 <= i < n_sites):
             raise ValueError(f"Single qubit index {i} out of bounds for MPO with {n_sites} sites.")
-        print(f"  Calculating environment for 1Q gate at site {i}")
+        # print(f"  Calculating environment for 1Q gate at site {i}")
         indices = (i,)
         ip1 = None # Explicitly mark as None for clarity
 
@@ -288,7 +288,7 @@ def compute_gate_environment_tensor(
         # Check bounds
         if not (0 <= i < n_sites and 0 <= ip1 < n_sites):
              raise ValueError(f"Two qubit indices {(i, ip1)} out of bounds for MPO with {n_sites} sites.")
-        print(f"  Calculating environment for 2Q gate at sites ({i}, {ip1})")
+        # print(f"  Calculating environment for 2Q gate at sites ({i}, {ip1})")
 
         # 2. Extract the relevant MPO tensors
         E_top_tensors = (E_top_layer[i], E_top_layer[ip1])
@@ -369,7 +369,7 @@ def compute_upper_lower_environments(
 
         E_top_current = mpo_ref # Or retrieve from reset cache
         all_E_top = {circuit.num_layers-1: E_top_current} # Assuming L layers, index L is above layer L-1
-        print(f"    Stored E_top[{circuit.num_layers-1}]")
+        # print(f"    Stored E_top[{circuit.num_layers-1}]")
 
         sweep_direction = init_direction #'left_to_right' # Or 'right_to_left', choose convention. depends on canonical state of ref mpo
         for l in range(circuit.num_layers - 2, -1, -1): # L-2 down to 0
@@ -389,7 +389,7 @@ def compute_upper_lower_environments(
 
             # Cache environment that now sits *above* layer l
             all_E_top[l] = E_top_current  
-            print(f"    Stored E_top[{l}]")
+            # print(f"    Stored E_top[{l}]")
 
         return all_E_top   
 
@@ -399,7 +399,7 @@ def compute_upper_lower_environments(
         #NOTE: dangerous! instantiate id MPO directly.
         E_bot_current = mpo_ref # should be an id MPO 
         all_E_bot = {0: E_bot_current} # Layer 0 bottom Env is initialized.
-        print(f"    Stored E_bot[0]")
+        # print(f"    Stored E_bot[0]")
 
         sweep_direction = init_direction #'left_to_right' # Or 'right_to_left', choose convention. depends on canonical state of ref mpo
         for l in range(1, circuit.num_layers): # 1 to L-1
@@ -420,7 +420,7 @@ def compute_upper_lower_environments(
 
             # Cache environment that now sits *above* layer l
             all_E_bot[l] = E_bot_current  
-            print(f"    Stored E_bot[{l}]")
+            # print(f"    Stored E_bot[{l}]")
 
 
         return all_E_bot
@@ -437,7 +437,7 @@ def compute_top_envs(
     Wrapper
     Precompute only the *top* environments E_top[l] (sitting above layer l), no bottoms.
     """
-    print("  Computing Top Environments...")
+    # print("  Computing Top Environments...")
     all_E_top = compute_upper_lower_environments(
         mpo_ref=mpo_ref_top, circuit=circuit, direction='top',
         init_direction=init_sweep_dir,
@@ -456,7 +456,7 @@ def compute_bottom_envs(
     Pre-compute only the *bottom* environments E_bot[l] (sitting below layer l),
     analogous to `compute_top_envs`.
     """
-    print("  Computing Bottom Environments...")
+    # print("  Computing Bottom Environments...")
     all_E_bot = compute_upper_lower_environments(
         mpo_ref=get_id_mpo(nsites=circuit.n_sites, dtype=circuit.dtype),
         circuit=circuit,
@@ -547,7 +547,7 @@ def sweeping_euclidean_gradient_bottom_up(
         return 'right_to_left' if init_horizontal_dir == 'left_to_right' else 'left_to_right'
     
     for l in range(circuit.num_layers):
-        print(f"    Layer {l}...")
+        # print(f"    Layer {l}...")
         layer: GateLayer = circuit.layers[l]
         E_top_l    = all_E_top[l]
         sweep_dir  = dir_for_layer(l)
@@ -570,6 +570,7 @@ def sweeping_euclidean_gradient_bottom_up(
             direction=sweep_dir, max_bondim=max_bondim_env, svd_cutoff=svd_cutoff
         )
 
+    # IV. Compute loss 
     L_boundary = jnp.eye(1, dtype=dtype)  # Start with a 1x1 identity
     for i in range(n_sites):
         top_tensor = mpo_ref_adj[i]
@@ -579,7 +580,6 @@ def sweeping_euclidean_gradient_bottom_up(
     trace = L_boundary.squeeze()
 
 
-    # IV. Compute loss 
     # Assemble grads in a STABLE canonical order (layer-major, left→right)
     grads_ordered: List[jnp.ndarray] = []
     for layer in circuit.layers:
@@ -651,7 +651,7 @@ def sweeping_euclidean_gradient_top_down(
 
     # II. Layer loop: TOP → BOTTOM
     for l in range(circuit.num_layers - 1, -1, -1):
-        print(f"    Layer {l}...")
+        # print(f"    Layer {l}...")
         layer            = circuit.layers[l]
         E_bottom_l       = all_E_bottom[l]        # environment *below* layer l
         sweep_dir        = dir_for_layer(l)
@@ -718,7 +718,7 @@ def _layer_pass_left_to_right(
     """
     layer_gradients: Dict[Gate, jnp.ndarray] = {}
 
-    print("      L->R Pass...")
+    # print("      L->R Pass...")
 
     E_right_boundaries = compute_layer_boundary_environments(
         E_top_l, E_bottom_current, current_layer, side="right"
@@ -798,7 +798,7 @@ def _layer_pass_right_to_left(
     """
     layer_gradients: Dict[Gate, jnp.ndarray] = {}
 
-    print("      R->L Pass...")
+    # print("      R->L Pass...")
 
     # For an R->L sweep we need, for each gate, the *left* boundary env
     # at its starting site, and we propagate a running *right* env.

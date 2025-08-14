@@ -30,7 +30,8 @@ def grad_G(f, G0, h: float = 1e-6):
 # Pytest test for sweeping_euclidean_gradient_bottom_up
 # --------------------------------------------------------------------
 @pytest.mark.parametrize("n_sites, n_layers_init, n_layers_target", [
-    (5, 10, 4),
+    (5, 15, 4),
+    (5, 2, 4),
 ])
 def test_bottom_up_sweep_matches_numeric(n_sites, n_layers_init, n_layers_target):
     seed_init = 42
@@ -50,6 +51,7 @@ def test_bottom_up_sweep_matches_numeric(n_sites, n_layers_init, n_layers_target
     target.sort_layers()
     target.print_gates()
     mpo_target = circuit_to_mpo(target)
+    U_target = target.to_matrix()
     mpo_target.left_canonicalize()
 
     init = generate_random_circuit(
@@ -70,7 +72,7 @@ def test_bottom_up_sweep_matches_numeric(n_sites, n_layers_init, n_layers_target
         circuit=init,
         mpo_ref=mpo_target,
         max_bondim_env=128,
-        svd_cutoff=1e-12,
+        svd_cutoff=0.0,
     )
 
     # Sanity checks
@@ -87,7 +89,7 @@ def test_bottom_up_sweep_matches_numeric(n_sites, n_layers_init, n_layers_target
                 tmp = init.copy()
                 tmp.layers[layer_idx].gates[gate_idx].matrix = displaced_gate
                 U_mat = tmp.to_matrix()
-                return jnp.trace(mpo_target.dagger().to_matrix() @ U_mat)
+                return jnp.trace(jnp.conjugate(U_target).T @ U_mat)
 
             E_num = grad_G(f, G0, h=1e-6)
             E_sweep = grads_ordered[k]
@@ -116,6 +118,7 @@ from rqcopt_mpo.optimization.gradient import sweeping_euclidean_gradient_top_dow
 
 @pytest.mark.parametrize("n_sites, n_layers_init, n_layers_target", [
     (5, 10, 4),
+    (5, 2, 4),
 ])
 def test_top_down_matches_numeric(
     n_sites, n_layers_init, n_layers_target
@@ -235,7 +238,7 @@ def setup_circ_and_mpo(n_sites, n_layers_init, n_layers_target, seed_init, seed_
 )
 @pytest.mark.parametrize(
     "n_sites, n_layers_init, n_layers_target, seed_init, seed_target",
-    [(5, 10, 4, 42, 44)],
+    [(5, 10, 30, 42, 44)],
 )
 def test_trace_calculation(
     gradient_function,
@@ -265,7 +268,7 @@ def test_trace_calculation(
         circuit=circuit,
         mpo_ref=mpo_ref,
         max_bondim_env=128, 
-        svd_cutoff=1e-14
+        svd_cutoff=0.0
     )
 
     print(f"\nTesting trace for {gradient_function.__name__}:")
@@ -275,7 +278,7 @@ def test_trace_calculation(
     np.testing.assert_allclose(
         trace_num,
         trace_exact,
-        rtol=1e-6,
+        rtol=1e-7,
         atol=1e-10,
         err_msg=f"Trace calculation failed for {gradient_function.__name__}"
     )

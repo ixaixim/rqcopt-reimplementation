@@ -8,6 +8,10 @@ from rqcopt_mpo.circuit.circuit_dataclasses import Gate
 from .geometry import project_to_tangent
 from rqcopt_mpo.optimization.gradient import cost_and_euclidean_grad
 from rqcopt_mpo.utils.batching import build_buckets
+from rqcopt_mpo.optimization.utils import overlap_to_loss
+
+# debug
+from .geometry import project_to_tangent
 
 def _iterate_canonical(circ) -> List:
     """layer-major, left→right (must match gradient order)."""
@@ -66,7 +70,7 @@ def optimize(
     state1, state2 = opt1.init(U1), opt2.init(U2)
 
     # TODO: set init_vertical_sweep and alternate it.
-    init_vertical_sweep = 'bottom-up'
+    init_vertical_sweep = 'top-down'
 
     def _vert_dir(step: int) -> str:
         """alternate bottom-up / top-down every iteration"""
@@ -80,15 +84,37 @@ def optimize(
     history: List[float] = []
 
     for it in range(max_steps):
-        loss, grads_ordered, info = cost_and_euclidean_grad(
+        overlap, grads_ordered, info = cost_and_euclidean_grad(
             circuit,
             reference_mpo,
             vertical_sweep=_vert_dir(it),
             max_bondim_env=max_bondim_env,
             svd_cutoff=svd_cutoff,
         )
+        # compute grad of HST loss function using trace gradients
+        if reference_mpo.is_normalized:
+            c = 1.0 / (2 ** circuit.n_sites)
+        else:
+            c = 1.0 / (2 ** (2 * circuit.n_sites))
 
+        # scalar factor: -c * conj(T)
+        scale = -2*c*overlap
+        # scale = -1.0
+
+        # convert "trace partial deriv wrt G" dT/dG_i into HST grads: grad L/dG_i 
+        grads_ordered = [scale * g.conj()  for g in grads_ordered]
+
+        # compute loss
+        loss = overlap_to_loss(overlap=overlap, kind='HST', n_sites=circuit.n_sites, normalize=reference_mpo.is_normalized) 
         # 1.2 split gradients into the two homogeneous stacks
+        print(f"overlap: {overlap}")
+        print(f"loss: {loss}")
+        if it == 0:
+            for gi, (gate, grad) in enumerate(zip(_iterate_canonical(circuit), grads_ordered)):
+                grad_tangent = project_to_tangent(gate.matrix, grad)
+                norm = float(jnp.linalg.norm(grad_tangent))
+                print(f"    gate {gi:02d} tangent grad norm: {norm:.3e}")
+
         g1 = (
             jnp.stack([grads_ordered[i] for i in idx1], axis=0)
             if idx1 else jnp.empty((0, 2, 2), dtype=circuit.dtype)
@@ -102,11 +128,13 @@ def optimize(
         U1, state1, stats1 = opt1.step(U1, g1, state1)
         U2, state2, stats2 = opt2.step(U2, g2, state2)
 
+        if it == 0:
+            print("step norm", jnp.linalg.norm(stats1["grad_norm"]))
         # 1.4 write updated unitaries back to the live circuit
         _scatter_back(circuit, U1, U2, idx1, idx2)
 
         # 1.5 bookkeeping
-        history.append(float(loss))
+        history.append(loss)
 
         # TODO: callback
 

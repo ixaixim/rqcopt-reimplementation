@@ -2,6 +2,8 @@
 # the code is adapted to work with batched arrays
 from __future__ import annotations
 
+import rqcopt_mpo.jax_config
+
 from typing import Tuple, Optional
 
 

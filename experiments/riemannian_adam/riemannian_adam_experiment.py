@@ -13,19 +13,20 @@ import jax.numpy as jnp
 import numpy as np
 
 # params for initial circuit and for target
-J, Delta, h = 1.0, 1.0, 1.0     # Heisenberg parameters 
-n_sites      = 4               # size of the chain
+J, Delta, h = 1.0, 1.0, 0.0     # Heisenberg parameters 
+n_sites = 4               # size of the chain
 dt = 0.2
 reps = 5
 dtype = jnp.complex128
-target_is_normalized = True
+normalize_target = True
+# TODO: check if Trotterized circuit with magnetic field is correctly implemented
 
 # optimization params
 lr = 1e-3
 betas = (0.9, 0.999)
 eps = 1e-8
 clip_grad_norm = None
-max_steps = 5
+max_steps = 20
 max_bondim_env = 128
 svd_cutoff = 0.0
 
@@ -35,9 +36,10 @@ target_circ = trotterized_heisenberg_circuit(
     order=4, dt=dt, reps=reps,
     dtype=dtype
 )
-# target_circ.print_gates()
+target_circ.print_gates()
 target_mpo = circuit_to_mpo(target_circ)
-if target_is_normalized: 
+
+if normalize_target: 
     target_mpo.normalize()
 target_mpo.left_canonicalize()
 
@@ -51,9 +53,18 @@ init_circ = trotterized_heisenberg_circuit(
     order=2,
     dtype=dtype,
 )
-init_circ.print_gates()
+# init_circ.print_gates()
+# init_circ = target_circ.copy()
 #run optimization
+overlap = np.trace(target_mpo.dagger().to_matrix() @ init_circ.to_matrix()) 
+loss = 1 - 1/2**(2*n_sites) * np.abs(overlap)**2
+print(f"initial loss {loss}")
+print(f"Debug: initial overlap: {overlap}")
+
 print("Optimizing Benchmark Trotter Circuit")
+
+
+
 
 # optimize circuit
 loss = optimize(init_circ, target_mpo,
@@ -65,6 +76,6 @@ loss = optimize(init_circ, target_mpo,
 
 # save loss data for plotting
 base_dir = here = Path(__file__).resolve().parent
-save_data_npz(base_dir, 'loss_riemannian', loss)
+save_data_npz(base_dir, 'loss_riemannian', loss, method='Riemannian_Adam_trotterized_init')
 
 
