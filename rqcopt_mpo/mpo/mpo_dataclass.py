@@ -18,6 +18,7 @@ class MPO:
     is_left_canonical: bool = False
     is_right_canonical: bool = False
     norm: Optional[float] = None # Store norm after canonicalization
+    is_normalized: bool = False
 
     def __post_init__(self):
         if not self.tensors:
@@ -51,7 +52,8 @@ class MPO:
         return MPO(tensors=new_tensors, 
                    is_left_canonical=self.is_left_canonical,
                    is_right_canonical=self.is_right_canonical,
-                   norm=self.norm)
+                   norm=self.norm,
+                   is_normalized=self.is_normalized)
     
     def dagger(self) -> "MPO":
         """
@@ -79,7 +81,8 @@ class MPO:
             tensors=dag_tensors,
             is_left_canonical=self.is_right_canonical,
             is_right_canonical=self.is_left_canonical,
-            norm=self.norm,
+            norm=self.norm, 
+            is_normalized=self.is_normalized
         )
     
     def conjugate(self) -> "MPO":
@@ -103,6 +106,7 @@ class MPO:
             is_left_canonical=self.is_left_canonical,
             is_right_canonical=self.is_right_canonical,
             norm=conj_norm,
+            is_normalized=self.is_normalized
         )
 
 
@@ -189,12 +193,15 @@ class MPO:
         Q_last = Q_last * phi
         R_last = R_last * jnp.conj(phi)
         final_norm = R_last[0,0]
-        self.norm = final_norm.real # imaginary part is zero, store norm as single float.
         # Update last tensor
         if normalize:
             current_tensors[-1] = Q_last.reshape(shape_last[:-1] + (Q_last.shape[-1],))
             self.norm = 1.0
-        
+            self.is_normalized = True
+        else:
+            self.norm = final_norm.real # imaginary part is zero, store norm as single float.
+            self.is_normalized = False
+
         self.is_left_canonical = True
         self.is_right_canonical = False 
         
@@ -265,7 +272,6 @@ class MPO:
         Q_first_core_phased = Q_first_core * phi        # Absorb phase into Q_first_core
 
         final_norm = L_first_phased[0,0]
-        self.norm = final_norm.real 
 
         # Update first tensor ONLY if normalize is true
         if normalize:
@@ -273,6 +279,10 @@ class MPO:
                 (Q_first_core_phased.shape[0],) + shape_first[1:]
             )
             self.norm = 1.0
+            self.is_normalized = True
+        else:
+            self.norm = final_norm.real 
+            self.is_normalized = False
         # If not normalizing, current_tensors[0] effectively remains L_first_phased @ Q_first_core_phased
         # which is the same as L_first_matrix @ Q_first_core, i.e., the original mpo_first (after loop contractions).
 
@@ -282,12 +292,16 @@ class MPO:
         print(f"MPO right-canonicalized. Fixed Gauge Norm: {self.norm}")
         return None if normalize else self.norm
 
+    def _invalidate_norm(self) -> None:
+            """Call whenever you modify tensors without re-normalizing."""
+            self.is_normalized = False
+
     def normalize(self) -> float:
         """
         If the MPO is left-canonical (resp. right-canonical) it
         extracts the global Frobenius norm from the *right-most*
         (resp. *left-most*) tensor, stores the resulting unit-norm
-        tensor back into ``self.tensors`` and returns the norm.
+        tensor back into ``self.tensors`` and returns the old norm.
 
         The routine does **not** change the canonical flags – it only
         adjusts the stored norm.  It raises an error if the MPO is
@@ -307,12 +321,13 @@ class MPO:
             Q  *= phi
             R  *= jnp.conj(phi)
 
-            norm = float(R[0, 0].real)                 # scalar ‖M‖
+            old_norm = float(R[0, 0].real)                 # scalar ‖M‖
 
             # write back the *unit* tensor
             self.tensors[-1] = Q.reshape(T.shape[:-1] + (Q.shape[-1],))
-            self.norm = norm  # TODO: set to 1 since normalized.
-            return norm
+            self.norm = 1.0  
+            self.is_normalized = True
+            return old_norm
 
         # -----------------------------------
         #  Normalise a right-canonical MPO
@@ -331,12 +346,12 @@ class MPO:
             Q  *= phi
             L  *= jnp.conj(phi)
 
-            norm = float(L[0, 0].real)                 # scalar ‖M‖
+            old_norm = float(L[0, 0].real)                 # scalar ‖M‖
 
             # write back the *unit* tensor
             self.tensors[0] = Q.reshape((Q.shape[0],) + T.shape[1:])
-            self.norm = norm # TODO: set to 1 since normalized.
-            return norm
+            self.norm = 1.0 # TODO: set to 1 since normalized.
+            return old_norm
 
         # Neither flag (or both) set → ambiguous state
         raise ValueError(
@@ -370,7 +385,12 @@ class MPO:
         """
         header = f"MPO  (n_sites = {self.n_sites},  p_out = {self.physical_dim_out}, p_in = {self.physical_dim_in})"
         if show_flags:
-            header += f"   [left‑can: {self.is_left_canonical},  right‑can: {self.is_right_canonical},  norm: {self.norm}]"
+            header += (
+                f"   [left-can: {self.is_left_canonical},  "
+                f"right-can: {self.is_right_canonical},  "
+                f"normalized: {self.is_normalized},  "
+                f"norm: {self.norm}]"
+            )
         print(header)
 
         if self.n_sites == 0:
