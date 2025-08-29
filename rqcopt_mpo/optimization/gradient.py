@@ -686,7 +686,7 @@ def sweeping_euclidean_gradient_top_down(
         L_boundary = jnp.einsum("ai, abcd, icbj -> dj", L_boundary, top_tensor, bottom_tensor, optimize="optimal")
     trace = L_boundary.squeeze()
 
-
+    # NOTE: consider also other ways of storing the euclidean gradients, this is ambiguous.
     # IV. Collect gradients in canonical (layer-major) order
     grads_ordered: List[jnp.ndarray] = []
     for layer in circuit.layers:

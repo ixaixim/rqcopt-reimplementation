@@ -78,7 +78,7 @@ def test_decomposition_preserves_unitary(seed):
     # weyl_decomposed_circuit.print_gates()
     # TODO: check that decomposed zyz circuit is the same  as original_circuit (so far, only weyl_decomposed_circuit satisfies the equality.)
     final_decomposed_circuit = euler_zyz_decompose_circuit(weyl_decomposed_circuit, include_global_phase=False)
-   
+    final_decomposed_circuit.print_gates()
     
     # Calculate the unitary of the final, fully decomposed circuit.
     decomposed_matrix = final_decomposed_circuit.to_matrix()

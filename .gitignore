@@ -178,3 +178,6 @@ scratchpad.txt
 *.png
 *.txt
 *.npz
+
+# other
+trial.ipynb

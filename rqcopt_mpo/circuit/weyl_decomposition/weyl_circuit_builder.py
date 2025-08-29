@@ -12,7 +12,7 @@ import numpy as np
 from typing import Dict, List, Tuple
 
 # TODO: this implementation currently is not implemented in JAX.
-def weyl_decompose_gate(gate: Gate, k2_layer: int) -> list[Gate]:
+def weyl_decompose_gate(gate: Gate, k2_layer: int, keep_global_phase: bool = True) -> list[Gate]:
     """
     Replace a two-qubit Gate by its Weyl factors.
     Returns three **new** Gate objects whose `layer_index`
@@ -48,11 +48,13 @@ def weyl_decompose_gate(gate: Gate, k2_layer: int) -> list[Gate]:
     ZZ = np.kron([[1,0],[0,-1]], [[1,0],[0,-1]])
     nonlocal_op = gl_phase * expm(1j*(a*XX + b*YY + c*ZZ))
 
+    params_nonlocal_op = (a,b,c,decomp.global_phase) if keep_global_phase else (a,b,c)
+    
     g_ent  = Gate(matrix=nonlocal_op,
                   qubits=(left, right),
                   layer_index=k2_layer+1,
                   name="Exp(XX+YY+ZZ)", decomposition_part="Exp",
-                  params=(a,b,c,decomp.global_phase),
+                  params=params_nonlocal_op,
                   original_gate_qubits=gate.qubits)
 
     # (c) K1 layer -----------------------------------------------------------
@@ -65,7 +67,7 @@ def weyl_decompose_gate(gate: Gate, k2_layer: int) -> list[Gate]:
 
     return [g_k2l, g_k2r, g_ent, g_k1l, g_k1r]
 
-def weyl_decompose_circuit(orig: Circuit) -> Circuit:
+def weyl_decompose_circuit(orig: Circuit, keep_global_phase=True) -> Circuit:
     """
     Map an n-layer brickwall Circuit to a 3 n-layer Circuit
     by Weyl-decomposing every two-qubit gate.
@@ -77,7 +79,7 @@ def weyl_decompose_circuit(orig: Circuit) -> Circuit:
         for gate in layer.gates:
             # Put K2 factors at 'layer.layer_index + layer_offset = target_base'
             target_base = layer.layer_index * 3       
-            pieces = weyl_decompose_gate(gate, target_base)
+            pieces = weyl_decompose_gate(gate, target_base, keep_global_phase=keep_global_phase)
 
             # drop each piece into the correct GateLayer --------------------
             for pg in pieces:
