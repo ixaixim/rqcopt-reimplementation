@@ -12,12 +12,13 @@ import numpy as np
 n_sites = 8 # choose even number
 J = 1.0
 Delta = 1.0
+D = Delta*J
 # initialize reference circuit
 # order 4, 5 reps, dt=t/5, total time=1.
 target_circuit = trotterized_heisenberg_circuit(
     n_sites=n_sites,
     J=J,
-    D=Delta,
+    D=D,
     dt=0.2,
     reps=5,
     order=4,
@@ -34,7 +35,7 @@ target_mpo.left_canonicalize()
 init_circuit = trotterized_heisenberg_circuit(
     n_sites=n_sites,
     J=J,
-    D=Delta,
+    D=D,
     dt=0.2,
     reps=5,
     order=2,

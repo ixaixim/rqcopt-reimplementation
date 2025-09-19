@@ -94,7 +94,8 @@ def optimize_circuit_local_svd(
                     n_sites, dtype,
                 )
                 loss_history.extend(pass_losses_lr)
-                print(global_loss(pass_losses_lr, n_sites, target_is_normalized))
+                
+                print(global_loss(pass_losses_lr, n_sites=n_sites, normalize=target_is_normalized))
                 # --- Right-to-Left Pass within layer ---
                 # Similar logic, compute left boundaries, sweep right-to-left
                 # NOTE: the logic of the R-> L pass is different from the L->R, in the sense that it is more simple.
@@ -103,7 +104,8 @@ def optimize_circuit_local_svd(
                     n_sites, dtype,
                 )
                 loss_history.extend(pass_losses_rl)
-                print(global_loss(pass_losses_rl, n_sites, target_is_normalized))
+
+                print(global_loss(pass_losses_rl, n_sites=n_sites, normalize=target_is_normalized))
 
 
             # --- Update Bottom Environment for the *next* layer ---
@@ -145,16 +147,16 @@ def optimize_circuit_local_svd(
                     n_sites, dtype, 
                 )
                 loss_history.extend(pass_losses_lr)
-                print(global_loss(pass_losses_lr, n_sites, target_is_normalized))
+                print(global_loss(pass_losses_lr, n_sites=n_sites, normalize=target_is_normalized))
                 # --- Right-to-Left Pass within layer ---
                 # Similar logic, compute left boundaries, sweep right-to-left
-                # NOTE: the logic of the R-> L pass is different from the L->R, in the sense that it is more simple.
+                # NOTE: the logic of the R-> L pass is the same from the L->R, but the code is more concise.
                 pass_losses_rl = _layer_pass_right_to_left(
                     current_layer, E_top_current, E_bottom_l, 
                     n_sites, dtype,
                 )
                 loss_history.extend(pass_losses_rl)
-                print(global_loss(pass_losses_rl, n_sites, target_is_normalized))
+                print(global_loss(pass_losses_rl, n_sites=n_sites, normalize=target_is_normalized))
 
             # --- Update Top Environment for the *next* layer ---
             
@@ -258,7 +260,7 @@ def _layer_pass_left_to_right(
             E_top_l, E_bottom_current,
             E_left_current,                     # already accumulated left env
             E_right_current                     # pre-computed right env
-        ).conj()
+        )
 
         # ──────────────────────────────────────────────────────────────────
         # 3c.  SVD-based polar-project update  (same recipe as R→L pass)
@@ -268,13 +270,13 @@ def _layer_pass_left_to_right(
         in_shape     = Env.shape[: env_ndim // 2]
         matrix_env   = Env.reshape(np.prod(out_shape), np.prod(in_shape))
 
-        U, S, Vh = jnp.linalg.svd(matrix_env, full_matrices=False)
+        U, S, Vh = jnp.linalg.svd(matrix_env.conj(), full_matrices=False)
 
         new_gate_matrix = (U @ Vh)
         new_gate_obj    = gate.copy()            # retain meta-data/qubits
         new_gate_obj.matrix = new_gate_matrix
 
-        trace = compute_trace(Env, new_gate_obj.tensor)
+        trace = compute_trace(Env.conj(), new_gate_obj.tensor)
         pass_loss_history.append(trace)
 
         # Overwrite the gate inside current_layer.gates
@@ -352,7 +354,7 @@ def _layer_pass_right_to_left(
 
             Env = compute_gate_environment_tensor(
                 qubits, E_top_l, E_bottom_current, E_left_current, E_right_current
-            ).conj()
+            )
             # Env tensor dimensions are assumed: (in_0, in_1, ..., out_0, out_1, ...)
             env_ndim = Env.ndim
             out_indices_shape = Env.shape[env_ndim//2:] # Shape of output physical legs (for the 'ket' part of the gate matrix)
@@ -360,13 +362,13 @@ def _layer_pass_right_to_left(
 
             
             matrix_env = Env.reshape(np.prod(out_indices_shape), np.prod(in_indices_shape))
-            U_svd, S_svd, Vh_svd = jnp.linalg.svd(matrix_env, full_matrices=False)
+            U_svd, S_svd, Vh_svd = jnp.linalg.svd(matrix_env.conj(), full_matrices=False)
             
             new_gate_matrix = (U_svd @ Vh_svd) # Shape (TotalOutDim, TotalInDim)
             new_gate_obj = gate.copy() # Copies structure (qubits, name, etc.)
             new_gate_obj.matrix = new_gate_matrix 
 
-            trace = compute_trace(Env, new_gate_obj.tensor)
+            trace = compute_trace(Env.conj(), new_gate_obj.tensor)
             pass_loss_history.append(trace)
 
             idx_in_layer_list = gate_to_idx_map[id(gate)]

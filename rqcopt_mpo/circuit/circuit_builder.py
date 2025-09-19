@@ -133,3 +133,72 @@ def generate_random_circuit(
 
     return circuit
 
+
+# ---------------------------------------------------------------------
+def generate_random_brickwall_circuit(
+    n_sites: int,
+    n_layers: int,
+    *,
+    seed: Optional[int] = None,
+    two_qubit_name: str = "U2",
+    dtype = jnp.complex128,
+) -> "Circuit":
+    """
+    Build a random brickwall Circuit with `n_layers` layers on `n_sites` qubits.
+
+    - Even layers place disjoint 2-qubit gates on pairs (0,1), (2,3), ...
+    - Odd  layers place disjoint 2-qubit gates on pairs (1,2), (3,4), ...
+    - Each 2-qubit gate is a Haar-random unitary of size 4x4.
+
+    Parameters
+    ----------
+    n_sites, n_layers : int
+        Circuit width and depth.
+    seed : int | None
+        PRNG seed used for sampling the random unitaries.
+    two_qubit_name : str
+        Name assigned to the 2-qubit gates.
+    dtype
+        Complex dtype for generated matrices.
+
+    Returns
+    -------
+    Circuit
+        Brickwall circuit with random two-qubit unitaries.
+    """
+    if n_sites < 1 or n_layers < 1:
+        raise ValueError("n_sites and n_layers must be positive.")
+
+    key = jax.random.PRNGKey(0 if seed is None else int(seed))
+    circuit = Circuit(n_sites=n_sites)
+
+    for layer_idx in range(n_layers):
+        gates = []
+        start = 0 if (layer_idx % 2 == 0) else 1
+
+        site = start
+        while site + 1 < n_sites:
+            key, subkey = jax.random.split(key)
+            matrix = _random_unitary(4, key=subkey, dtype=dtype)
+            gates.append(
+                Gate(
+                    matrix=matrix,
+                    qubits=(site, site + 1),
+                    layer_index=layer_idx,
+                    name=two_qubit_name,
+                    params=(),
+                    original_gate_qubits=None,
+                    decomposition_part="full",
+                )
+            )
+            site += 2
+
+        circuit.layers.append(
+            GateLayer(
+                layer_index=layer_idx,
+                is_odd=(layer_idx % 2 == 1),
+                gates=gates,
+            )
+        )
+
+    return circuit

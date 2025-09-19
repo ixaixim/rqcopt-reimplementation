@@ -273,13 +273,13 @@ def _layer_pass_left_to_right(
         in_shape     = Env.shape[: env_ndim // 2]
         matrix_env   = Env.reshape(np.prod(out_shape), np.prod(in_shape))
 
-        U, S, Vh = jnp.linalg.svd(matrix_env, full_matrices=False)
+        U, S, Vh = jnp.linalg.svd(matrix_env.conj(), full_matrices=False)
 
         new_gate_matrix = _weyl_gate_update(U, Vh)
         new_gate_obj    = gate.copy()            # retain meta-data/qubits
         new_gate_obj.matrix = new_gate_matrix
 
-        trace = compute_trace(Env, new_gate_obj.tensor)
+        trace = compute_trace(Env.conj(), new_gate_obj.tensor)
         pass_loss_history.append(trace)
 
         # Overwrite the gate inside current_layer.gates
@@ -365,13 +365,13 @@ def _layer_pass_right_to_left(
 
             
             matrix_env = Env.reshape(np.prod(out_indices_shape), np.prod(in_indices_shape))
-            U, S, Vh = jnp.linalg.svd(matrix_env, full_matrices=False)
+            U, S, Vh = jnp.linalg.svd(matrix_env.conj(), full_matrices=False)
             
             new_gate_matrix =_weyl_gate_update(U,Vh) # Shape (TotalOutDim, TotalInDim)
             new_gate_obj = gate.copy() # Copies structure (qubits, name, etc.)
             new_gate_obj.matrix = new_gate_matrix 
 
-            trace = compute_trace(Env, new_gate_obj.tensor)
+            trace = compute_trace(Env.conj(), new_gate_obj.tensor)
             pass_loss_history.append(trace)
 
             idx_in_layer_list = gate_to_idx_map[id(gate)]

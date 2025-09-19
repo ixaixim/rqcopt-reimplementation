@@ -17,8 +17,9 @@ from rqcopt_mpo.circuit.circuit_dataclasses import Circuit
 
 
 # ------------------------- problem setup ---------------------------------- #
-J, Delta, h = 1.0, 1.0, 1.0     # Heisenberg parameters (XXX model)
-n_sites      = 4               # size of the chain
+J, Delta, h = 1.0, 1.0, 0.25     # Heisenberg parameters (XXX model)
+D = J*Delta
+n_sites      = 6               # size of the chain
 total_time_t = 1.0              # simulate up to t = 1
 
 # --- MODIFICATION START: Control which Trotter order(s) to plot ---
@@ -42,7 +43,7 @@ def trotter_unitary(order: int, delta_t: float, n_steps: int) -> jnp.ndarray:
     matrix for a given Δt and number of steps n such that n * Δt = t.
     """
     layers = trotterized_heisenberg_layers(
-        n_sites=n_sites, J=J, D=Delta, h=h,
+        n_sites=n_sites, J=J, D=D, h=h,
         order=order, dt=delta_t, reps=n_steps,
         dtype=jnp.complex128
     )

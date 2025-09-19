@@ -154,8 +154,27 @@ class MPO:
         Returns the norm if normalize is False, otherwise None.
         """
         if self.is_left_canonical:
-             print("MPO is already left-canonical.")
-             return None if normalize else self.norm
+            print("MPO is already left-canonical.")
+            if not self.is_normalized:
+                # TODO: should call just the normalize method and have the special case there.
+                if normalize:
+                    print("However, MPO is not normalized. Proceeding to normalize.")
+                    mpo = self.tensors[-1]
+                    shape = mpo.shape
+                    left_dims_prod = np.prod(shape[:-1])
+                    mpo_matrix = mpo.reshape((left_dims_prod, shape[-1]))
+                    Q, R = jnp.linalg.qr(mpo_matrix, mode='reduced')
+                    phi = R[0,0] / jnp.abs(R[0,0])
+                    Q = Q * phi
+                    R = R * jnp.conj(phi)
+                    self.tensors[-1] = Q.reshape(shape[:-1] + (Q.shape[-1],))
+                    self.norm = 1.0
+                    self.is_normalized = True
+                    return None            
+            
+            print("MPO is already normalized.")
+            return None if normalize else self.norm
+            
              
         current_tensors = self.tensors 
 
@@ -210,8 +229,36 @@ class MPO:
 
     def right_canonicalize(self, normalize: bool = False) -> Optional[float]:
         if self.is_right_canonical:
-             print("MPO is already right-canonical.")
-             return None if normalize else self.norm
+            print("MPO is already right-canonical.")
+            if not self.is_normalized:
+                # TODO: should call just the normalize method and have the special case there.
+                if normalize:
+                    print("However, MPO is not normalized. Proceeding to normalize.")
+                    mpo = self.tensors[0]
+                    shape = mpo.shape  # (l, p_out, p_in, r)
+                    # Merge all but the first leg to form A.T with shape (prod(p_out,p_in,r), l)
+                    right_dims_prod = int(np.prod(shape[1:]))
+                    mpo_matrix_T = mpo.reshape((shape[0], right_dims_prod)).T
+
+                    # QR of A.T gives A.T = Q' R', hence A = R'^T Q'^T
+                    Q_prime, R_prime = jnp.linalg.qr(mpo_matrix_T, mode='reduced')
+                    L_first_matrix = R_prime.T    # (l, k)
+                    Q_first_core = Q_prime.T      # (k, prod(p_out,p_in,r))
+
+                    # Fix the overall gauge so that L_first_matrix[0,0] is real and positive
+                    phi = L_first_matrix[0, 0] / jnp.abs(L_first_matrix[0, 0])
+                    Q_first_core = Q_first_core * phi
+                    L_first_matrix = L_first_matrix * jnp.conj(phi)
+
+                    # Write back the unit-norm first tensor
+                    new_left_bond_dim = Q_first_core.shape[0]
+                    self.tensors[0] = Q_first_core.reshape((new_left_bond_dim,) + shape[1:])
+                    self.norm = 1.0
+                    self.is_normalized = True
+                    return None
+
+            print("MPO is already normalized.")
+            return None if normalize else self.norm
 
         current_tensors = self.tensors
         # Iterate from the second-to-last site down to the first site (0-indexed)

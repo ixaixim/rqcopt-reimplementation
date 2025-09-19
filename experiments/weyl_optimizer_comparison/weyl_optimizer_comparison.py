@@ -3,6 +3,7 @@ import rqcopt_mpo.jax_config
 
 from pathlib import Path
 
+from rqcopt_mpo.circuit.circuit_builder import generate_random_brickwall_circuit
 from rqcopt_mpo.circuit.trotter.trotter_circuit_builder import trotterized_heisenberg_circuit
 from rqcopt_mpo.circuit.weyl_decomposition.weyl_circuit_builder import weyl_decompose_circuit, absorb_single_qubit_layers
 from rqcopt_mpo.mpo.mpo_builder import circuit_to_mpo
@@ -13,47 +14,91 @@ import matplotlib.pyplot as plt
 from experiments.utils import save_data_npz
 import jax.numpy as jnp
 import numpy as np
+from rqcopt_mpo.optimization.utils import overlap_to_loss
 
-# params for initial circuit and for target
-J, Delta, h = 1.0, 1.0, 1.0     # Heisenberg parameters 
-n_sites      = 4               # size of the chain
-dt = 0.2
-reps = 5
-dtype = jnp.complex128
-target_is_normalized = True
+
 
 # optimization params
 num_sweeps = 5
 layer_update_passes = 1
-max_bondim_env = 128
+max_bondim_env = 256
 svd_cutoff = 0.0
+
+
+### Trotter initialization
+# trotterization params
+n_sites = 8 # choose even number
+J = 1.0
+D = -1.0
+h = 0
+t = 0.5 # time of evolution
+
+reps = 10
+order = 4
+dt = t/reps
+dtype = jnp.complex128
+target_is_normalized = False
 
 # set up target MPO
 target_circ = trotterized_heisenberg_circuit(    
-    n_sites=n_sites, J=J, D=Delta, h=h,
+    n_sites=n_sites, J=J, D=D, h=h,
     order=4, dt=dt, reps=reps,
     dtype=dtype
 )
-target_circ.print_gates()
-target_mpo = circuit_to_mpo(target_circ)
-if target_is_normalized: 
-    target_mpo.normalize()
-target_mpo.left_canonicalize()
 
-# set up initial vanilla circuit
+target_mpo = circuit_to_mpo(target_circ)
+target_mpo.left_canonicalize(normalize=target_is_normalized)
+
+# set up quantum circuit
+
+reps = 3
+dt = t/reps
 init_circ = trotterized_heisenberg_circuit(
     n_sites=n_sites,
     J=J,
-    D=Delta,
+    D=D,
     dt=dt,
     reps=reps,
     order=2,
     dtype=jnp.complex128,
 )
 
+### SMALL CIRCUIT INITIALIZATION
+# set up target MPO
+# target_circ = trotterized_heisenberg_circuit(    
+#     n_sites=n_sites, J=J, D=Delta, h=h,
+#     order=4, dt=dt, reps=reps,
+#     dtype=dtype
+# )
+
+# set up initial vanilla circuit
+# init_circ = trotterized_heisenberg_circuit(
+#     n_sites=n_sites,
+#     J=J,
+#     D=Delta,
+#     dt=dt,
+#     reps=reps,
+#     order=2,
+#     dtype=jnp.complex128,
+# )
+
+# init_circ = generate_random_brickwall_circuit(
+#     n_sites=n_sites,    
+#     n_layers=5,
+#     seed=42,
+#     two_qubit_name="U2",
+#     dtype=dtype,
+# )
+
+# init_circ.print_gates()
+
 # set up initial Weyl circuit
 init_circ_weyl = init_circ.copy()
 init_circ_weyl = weyl_decompose_circuit(init_circ_weyl)
+
+trace = np.trace(target_circ.to_matrix().conjugate().T @ init_circ.to_matrix())
+hst_cost = overlap_to_loss(trace, n_sites=n_sites, normalize=False)
+print(f"Initial HST fidelity: {hst_cost}")
 
 print("Optimizing vanilla circuit")
 # optimize initial vanilla circuit
