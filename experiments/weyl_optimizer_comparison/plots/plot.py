@@ -2,24 +2,18 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-# plotting
-base_dir = Path(__file__).resolve().parents[1] / "data"
-fn = base_dir / "loss_vanilla_circ.npz"
-data = np.load(fn)
-loss_vanilla = data["loss"]        
-num_gates_vanilla_circ  = int(data["num_gates"])    
 
-fn = base_dir / "loss_weyl_circ.npz"
-data = np.load(fn)
-loss_weyl = data["loss"]        
-num_gates_weyl_circ  = int(data["num_gates"])    
+def load_loss_series(base_dir: Path, filename: str, label: str, color: str):
+    data = np.load(base_dir / filename)
+    loss = np.asarray(data["loss"])
+    num_gates = int(data["num_gates"])
+    return {
+        "label": label,
+        "loss": loss,
+        "num_gates": num_gates,
+        "color": color,
+    }
 
-
-loss_vanilla = np.asarray(loss_vanilla)
-loss_weyl    = np.asarray(loss_weyl)
-
-iters_vanilla = np.arange(len(loss_vanilla))
-iters_weyl    = np.arange(len(loss_weyl))
 
 def sweep_boundaries(n_gates: int, n_iters: int):
     """
@@ -29,43 +23,71 @@ def sweep_boundaries(n_gates: int, n_iters: int):
     period = n_gates * 4
     positions = np.arange(period, n_iters + 1, step=period)
 
-    return positions-1
+    return positions - 1
 
-vlines_vanilla = sweep_boundaries(num_gates_vanilla_circ, len(loss_vanilla))
-vlines_weyl    = sweep_boundaries(num_gates_weyl_circ,    len(loss_weyl))
 
-fig, ax = plt.subplots(figsize=(6, 4))
+def loss_after_sweep(loss: np.ndarray, num_gates: int):
+    period = num_gates * 4
+    if period == 0:
+        return np.array([]), np.array([])
+    sweep_indices = sweep_boundaries(num_gates, len(loss))
+    if len(sweep_indices) == 0:
+        return np.array([]), np.array([])
+    sweep_numbers = np.arange(1, len(sweep_indices) + 1)
+    return sweep_numbers, loss[sweep_indices]
 
-# filter from iteration 100 onwards
+
+base_dir = Path(__file__).resolve().parents[1] / "data"
+
+datasets = [
+    load_loss_series(base_dir, "loss_vanilla_circ.npz", "Vanilla", "C0"),
+    load_loss_series(base_dir, "loss_weyl_circ.npz", "Weyl", "C3"),
+    load_loss_series(base_dir, "loss_weyl_abs_circ.npz", "Weyl (absorbed)", "C1"),
+]
+
 start_iteration = 100
 
-ax.plot(iters_vanilla[start_iteration:], loss_vanilla[start_iteration:],
-        label=f"Vanilla – {num_gates_vanilla_circ} gates",
-        lw=1.6)
-ax.plot(iters_weyl[start_iteration:], loss_weyl[start_iteration:],
-        label=f"Weyl – {num_gates_weyl_circ} gates",
-        lw=1.6)
+# Plot loss after each gate update.
+fig, ax = plt.subplots(figsize=(6, 4))
 
-for i in vlines_vanilla:
-    if i >= start_iteration:
-        ax.axvline(i, ls="--", lw=0.8, color="grey", alpha=0.35)
+for entry in datasets:
+    loss = entry["loss"]
+    iters = np.arange(len(loss))
+    num_gates = entry["num_gates"]
+    label = f"{entry['label']} – {num_gates} gates"
+    color = entry["color"]
 
-for i in vlines_weyl:
-    if i >= start_iteration:
-        ax.axvline(i, ls="--", lw=0.8, color="red", alpha=0.25)
+    ax.plot(iters[start_iteration:], loss[start_iteration:], label=label, lw=1.6, color=color)
 
-# You can optionally still set the x-limit to ensure it starts exactly at 100
+    for boundary in sweep_boundaries(num_gates, len(loss)):
+        if boundary >= start_iteration:
+            ax.axvline(boundary, ls="--", lw=0.8, color=color, alpha=0.2)
+
 ax.set_xlim(left=start_iteration)
-
-
 ax.set_xlabel("Iteration")
 ax.set_ylabel("Loss")
-ax.set_yscale("log")                 # comment out if you want linear scale
+ax.set_yscale("log")
 ax.set_title("Local-SVD optimisation")
 ax.legend()
 plt.tight_layout()
 
-fn = Path(__file__).resolve().parent / "weyl_optimizer_comparison.png"
-plt.savefig(fn)
+output_dir = Path(__file__).resolve().parent
+plt.savefig(output_dir / "weyl_optimizer_comparison.png")
 
+# Plot loss after each full circuit sweep.
+fig_sweep, ax_sweep = plt.subplots(figsize=(6, 4))
 
+for entry in datasets:
+    sweep_count, sweep_loss = loss_after_sweep(entry["loss"], entry["num_gates"])
+    if len(sweep_count) == 0:
+        continue
+    ax_sweep.plot(sweep_count, sweep_loss, marker="o", label=entry["label"], lw=1.6, color=entry["color"])
+
+ax_sweep.set_xlabel("Sweep")
+ax_sweep.set_ylabel("Loss")
+ax_sweep.set_yscale("log")
+ax_sweep.set_title("Local-SVD optimisation (per sweep)")
+ax_sweep.legend()
+plt.tight_layout()
+
+plt.savefig(output_dir / "weyl_optimizer_comparison_per_sweep.png")

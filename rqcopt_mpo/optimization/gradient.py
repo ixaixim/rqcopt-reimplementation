@@ -255,6 +255,19 @@ def compute_gate_environment_tensor(
         The environment tensor, with indices corresponding to the gate's
         output and input physical legs. The index order
         should match the gate tensor convention (e.g., out1, out2, in1, in2).
+
+    Notes on complex calculus conventions
+    -------------------------------------
+    Throughout this module we distinguish between:
+    - Wirtinger derivative ∂f/∂G (treating G and G* as independent), and
+    - The Riesz/Euclidean gradient Grad f under the complex inner product
+      ⟨A,B⟩ = Tr(A^† B).
+
+    For a holomorphic scalar f(G) = Tr(V^† U(G)), the horizontal sweep returns
+    an "environment" tensor Env that equals the Wirtinger derivative ∂f/∂G.
+    The scalar can be reconstructed via the complex inner product as
+        f(G) = Tr((Grad f)^† G) = Tr((conj(∂f/∂G))^† G),
+    which in our code appears as contractions of Env.conj() with the gate tensor.
     """
     n_sites = len(E_top_layer)
     if n_sites != len(E_bottom_layer):
@@ -303,7 +316,12 @@ def compute_gate_environment_tensor(
 
 
 def compute_trace(Environment: jnp.ndarray, gate_tensor: jnp.ndarray):
-    # the environment has been defined such that the full trace tr(U_reference^dagger W_circuit) is equivalent to tr(Env^*T G). 
+    # The environment returned by the sweep equals the Wirtinger derivative
+    #   Env = ∂/∂G Tr(U_ref^† U_circ(G)).
+    # To reconstruct the scalar via the complex inner product ⟨A,B⟩=Tr(A^†B),
+    # we use the Riesz gradient Grad f = conj(Env), hence:
+    #   Tr(U_ref^† U_circ) = Tr((Grad f)^† G) = Tr((conj(Env))^† G)
+    # which is implemented below via einsum of Environment.conj() with G.
     if gate_tensor.shape == (2,2,2,2):
         trace = jnp.einsum('ijdg, ijdg ->', Environment.conj(), gate_tensor)
     elif gate_tensor.shape == (2,2):

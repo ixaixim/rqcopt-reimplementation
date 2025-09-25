@@ -53,7 +53,7 @@ def optimize(
     clip_grad_norm: float = None,
     max_steps: int = 1000,
     callback: Callable = None,
-    init_vertical_sweep = "bottom-up",
+    init_vertical_sweep = "top-down",
     max_bondim_env : int,
     svd_cutoff: float = 1e-12,
 ) -> List[float]:
@@ -68,9 +68,6 @@ def optimize(
     opt1, opt2 = RiemannianAdam(lr, betas, eps, clip_grad_norm), \
                  RiemannianAdam(lr, betas, eps, clip_grad_norm)
     state1, state2 = opt1.init(U1), opt2.init(U2)
-
-    # TODO: set init_vertical_sweep and alternate it.
-    init_vertical_sweep = 'top-down'
 
     def _vert_dir(step: int) -> str:
         """alternate bottom-up / top-down every iteration"""
@@ -92,23 +89,22 @@ def optimize(
             svd_cutoff=svd_cutoff,
         )
         # compute grad of HST loss function using trace gradients
+        # L = 1 - c |T|^2,      T = overlap = <Env, G>
+        # dL/dG = -2 c conj(T) * dT/dG  with dT/dG = Env (no conjugation)
         if reference_mpo.is_normalized:
             c = 1.0 / (2 ** circuit.n_sites)
         else:
             c = 1.0 / (2 ** (2 * circuit.n_sites))
 
-        # scalar factor: -c * conj(T)
-        scale = -2*c*overlap
-        # scale = -1.0
+        scale = -2.0 * c * overlap
 
-        # convert "trace partial deriv wrt G" dT/dG_i into HST grads: grad L/dG_i 
-        grads_ordered = [scale * g.conj()  for g in grads_ordered]
+        # convert "trace partial deriv wrt G" dT/dG_i into HST grads: dL/dG_i
+        grads_ordered = [scale * g.conj() for g in grads_ordered]
 
         # compute loss
         loss = overlap_to_loss(overlap=overlap, kind='HST', n_sites=circuit.n_sites, normalize=reference_mpo.is_normalized) 
         # 1.2 split gradients into the two homogeneous stacks
-        print(f"overlap: {overlap}")
-        print(f"loss: {loss}")
+        print(f"It: {it}, Loss: {loss}")
         if it == 0:
             for gi, (gate, grad) in enumerate(zip(_iterate_canonical(circuit), grads_ordered)):
                 grad_tangent = project_to_tangent(gate.matrix, grad)

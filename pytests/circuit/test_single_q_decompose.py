@@ -6,7 +6,11 @@ import numpy as np
 
 # Assuming the following functions and classes are defined and accessible as per the problem description.
 from rqcopt_mpo.circuit.circuit_dataclasses import Gate, GateLayer, Circuit
-from rqcopt_mpo.circuit.circuit_builder import _random_unitary
+from rqcopt_mpo.circuit.circuit_builder import (
+    _random_unitary,
+    generate_random_brickwall_circuit,
+    generate_random_circuit,
+)
 from rqcopt_mpo.circuit.weyl_decomposition.weyl_circuit_builder import weyl_decompose_circuit
 from rqcopt_mpo.circuit.decompose.single_q_decompose import euler_zyz_decompose_circuit, zyz_decompose_gate
 from scipy.linalg import polar
@@ -98,6 +102,64 @@ def test_decomposition_preserves_unitary(seed):
     assert np.allclose(A, B), "The unitary matrix should not change after decomposition."
 
 
+@pytest.mark.parametrize("n_sites,n_layers,seed", [(4, 3, 0), (6, 4, 7)])
+def test_random_brickwall_decomposition_preserves_unitary(n_sites, n_layers, seed):
+    """Random multi-layer brickwall circuits stay unitary after full decomposition."""
+
+    circuit = generate_random_brickwall_circuit(
+        n_sites=n_sites,
+        n_layers=n_layers,
+        seed=seed,
+        dtype=jnp.complex128,
+    )
+
+    original_matrix = np.asarray(circuit.to_matrix(), dtype=np.complex128)
+
+    decomposed = euler_zyz_decompose_circuit(
+        weyl_decompose_circuit(circuit.copy(), keep_global_phase=False),
+        include_global_phase=False,
+    )
+
+    decomposed_matrix = np.asarray(decomposed.to_matrix(), dtype=np.complex128)
+    aligned = phase_align(original_matrix, decomposed_matrix)
+
+    np.testing.assert_allclose(aligned, original_matrix, rtol=0.0, atol=1e-12)
+
+
+@pytest.mark.parametrize(
+    "n_sites,n_layers,seed,p_single,p_two",
+    [
+        (4, 3, 5, 0.4, 0.4),
+        (5, 4, 9, 0.25, 0.5),
+    ],
+)
+def test_random_circuit_decomposition_preserves_unitary(
+    n_sites, n_layers, seed, p_single, p_two
+):
+    """Random circuits with mixed 1q/2q gates preserve their overall unitary."""
+
+    circuit = generate_random_circuit(
+        n_sites=n_sites,
+        n_layers=n_layers,
+        p_single=p_single,
+        p_two=p_two,
+        seed=seed,
+        dtype=jnp.complex128,
+    )
+
+    original_matrix = np.asarray(circuit.to_matrix(), dtype=np.complex128)
+
+    decomposed = euler_zyz_decompose_circuit(
+        weyl_decompose_circuit(circuit.copy(), keep_global_phase=False),
+        include_global_phase=False,
+    )
+
+    decomposed_matrix = np.asarray(decomposed.to_matrix(), dtype=np.complex128)
+    aligned = phase_align(original_matrix, decomposed_matrix)
+
+    np.testing.assert_allclose(aligned, original_matrix, rtol=0.0, atol=1e-12)
+
+
 # utilities to test single qubit Gate dataclass decomposition
 def random_unitary_2x2(seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
@@ -162,5 +224,3 @@ def test_zyz_reconstruction(seed, out_layer, include_global_phase):
         # equality up to a global phase
         W_aligned = phase_align(U, W)
         np.testing.assert_allclose(W_aligned, U, rtol=0, atol=1e-12)
-
-

@@ -1,81 +1,91 @@
-# compare the weyl circuit SVD optimization loss with regular circuit optimization loss.
 import rqcopt_mpo.jax_config
 
 from pathlib import Path
 
-from rqcopt_mpo.circuit.trotter.trotter_circuit_builder import trotterized_heisenberg_circuit
-from rqcopt_mpo.mpo.mpo_builder import circuit_to_mpo
-# TODO: import optimizer and loss
-from rqcopt_mpo.optimization.riemannian_adam.optimizer import optimize
-import matplotlib.pyplot as plt
-from experiments.utils import save_data_npz
 import jax.numpy as jnp
 import numpy as np
 
-# params for initial circuit and for target
-J, Delta, h = 1.0, 1.0, 0.0     # Heisenberg parameters 
-n_sites = 4               # size of the chain
-dt = 0.2
-reps = 5
+from rqcopt_mpo.circuit.trotter.trotter_circuit_builder import trotterized_heisenberg_circuit
+from rqcopt_mpo.mpo.mpo_builder import circuit_to_mpo
+from rqcopt_mpo.optimization.riemannian_adam.optimizer import optimize
+from experiments.utils import save_data_npz
+from rqcopt_mpo.optimization.utils import overlap_to_loss
+
+
+# trotterization params
+n_sites = 6 # choose even number
+J = 1.0
+D = -1.0
+h = 0
+t = 0.5 # time of evolution
+
+reps = 10
+order = 4
+dt = t/reps
 dtype = jnp.complex128
-normalize_target = True
-# TODO: check if Trotterized circuit with magnetic field is correctly implemented
+target_is_normalized = False
 
-# optimization params
-lr = 1e-3
-betas = (0.9, 0.999)
-eps = 1e-8
-clip_grad_norm = None
-max_steps = 20
-max_bondim_env = 128
-svd_cutoff = 0.0
-
-# set up target MPO from benchmark Trotter circuit
+# set up target MPO
 target_circ = trotterized_heisenberg_circuit(    
-    n_sites=n_sites, J=J, D=Delta, h=h,
+    n_sites=n_sites, J=J, D=D, h=h,
     order=4, dt=dt, reps=reps,
     dtype=dtype
 )
-target_circ.print_gates()
+print(f"Target circuit with {target_circ.num_layers} layers")
+
 target_mpo = circuit_to_mpo(target_circ)
+target_mpo.left_canonicalize(normalize=target_is_normalized)
 
-if normalize_target: 
-    target_mpo.normalize()
-target_mpo.left_canonicalize()
+# set up quantum circuit
 
-# set up initial initial brickwall circuit
+reps = 3
+dt = t/reps
 init_circ = trotterized_heisenberg_circuit(
     n_sites=n_sites,
     J=J,
-    D=Delta,
+    D=D,
     dt=dt,
     reps=reps,
     order=2,
-    dtype=dtype,
+    dtype=jnp.complex128,
 )
-# init_circ.print_gates()
-# init_circ = target_circ.copy()
-#run optimization
-overlap = np.trace(target_mpo.dagger().to_matrix() @ init_circ.to_matrix()) 
-loss = 1 - 1/2**(2*n_sites) * np.abs(overlap)**2
-print(f"initial loss {loss}")
-print(f"Debug: initial overlap: {overlap}")
 
-print("Optimizing Benchmark Trotter Circuit")
+print(f"Initial circuit with {init_circ.num_layers} layers")
+print(f"Initial Fidelity of Circuit: {overlap_to_loss(np.trace(init_circ.to_matrix().conjugate().T @ target_circ.to_matrix()), n_sites=n_sites, normalize=target_is_normalized)}")
 
+# # weyl decomp
+# init_circ = weyl_decompose_circuit(init_circ, keep_global_phase=False)
+# # euler rotation decomp
+# init_circ = euler_zyz_decompose_circuit(init_circ, include_global_phase=False)
+# print(f"Init Circuit Decomposed with {init_circ.num_layers} layers")
+# print(f"Initial Fidelity of Decomposed Circuit: {overlap_to_loss(np.trace(init_circ.to_matrix().conjugate().T @ target_circ.to_matrix()), n_sites=n_sites, normalize=target_is_normalized)}")
 
+# Optimization parameters
+lr = 1e-4
+betas = (0.9, 0.999)
+eps = 1e-8
+clip_grad_norm = None
+bias_correction = True
+max_steps = 100
+max_bondim_env = 128
+svd_cutoff = 0.0
 
+print("Optimizing brickwall circuit (Riemannian Adam)")
 
 # optimize circuit
-loss = optimize(init_circ, target_mpo,
-         lr=lr, betas=betas, eps=eps,
-         clip_grad_norm=clip_grad_norm, 
-         max_steps=max_steps,
-         max_bondim_env=max_bondim_env,
-         svd_cutoff=svd_cutoff)
+loss = optimize(
+    init_circ,
+    target_mpo,
+    lr=lr,
+    betas=betas,
+    eps=eps,
+    clip_grad_norm=clip_grad_norm,
+    max_steps=max_steps,
+    max_bondim_env=max_bondim_env,
+    svd_cutoff=svd_cutoff,
+)
 
 # save loss data for plotting
 base_dir = here = Path(__file__).resolve().parent
-save_data_npz(base_dir, 'loss_riemannian', loss, method='Riemannian_Adam_trotterized_init')
-
+save_data_npz(base_dir, 'loss_riemannian', loss, method='Riemannian_Adam')
 

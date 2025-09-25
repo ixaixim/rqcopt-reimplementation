@@ -19,9 +19,9 @@ from rqcopt_mpo.optimization.utils import overlap_to_loss
 
 
 # optimization params
-num_sweeps = 5
+num_sweeps = 20
 layer_update_passes = 1
-max_bondim_env = 256
+max_bondim_env = 128
 svd_cutoff = 0.0
 
 
@@ -37,7 +37,7 @@ reps = 10
 order = 4
 dt = t/reps
 dtype = jnp.complex128
-target_is_normalized = False
+target_is_normalized = True
 
 # set up target MPO
 target_circ = trotterized_heisenberg_circuit(    
@@ -49,8 +49,8 @@ target_circ = trotterized_heisenberg_circuit(
 target_mpo = circuit_to_mpo(target_circ)
 target_mpo.left_canonicalize(normalize=target_is_normalized)
 
-# set up quantum circuit
 
+# set up quantum circuit
 reps = 3
 dt = t/reps
 init_circ = trotterized_heisenberg_circuit(
@@ -63,38 +63,11 @@ init_circ = trotterized_heisenberg_circuit(
     dtype=jnp.complex128,
 )
 
-### SMALL CIRCUIT INITIALIZATION
-# set up target MPO
-# target_circ = trotterized_heisenberg_circuit(    
-#     n_sites=n_sites, J=J, D=Delta, h=h,
-#     order=4, dt=dt, reps=reps,
-#     dtype=dtype
-# )
-
-# set up initial vanilla circuit
-# init_circ = trotterized_heisenberg_circuit(
-#     n_sites=n_sites,
-#     J=J,
-#     D=Delta,
-#     dt=dt,
-#     reps=reps,
-#     order=2,
-#     dtype=jnp.complex128,
-# )
-
-# init_circ = generate_random_brickwall_circuit(
-#     n_sites=n_sites,    
-#     n_layers=5,
-#     seed=42,
-#     two_qubit_name="U2",
-#     dtype=dtype,
-# )
-
-# init_circ.print_gates()
-
 # set up initial Weyl circuit
+# Add a further comparison with the Weyl-absorbed circuit.
 init_circ_weyl = init_circ.copy()
 init_circ_weyl = weyl_decompose_circuit(init_circ_weyl)
+init_circ_weyl_abs = absorb_single_qubit_layers(init_circ_weyl)
 
 trace = np.trace(target_circ.to_matrix().conjugate().T @ init_circ.to_matrix())
 hst_cost = overlap_to_loss(trace, n_sites=n_sites, normalize=False)
@@ -118,15 +91,26 @@ _, loss_weyl = optimize_weyl_circuit_local_svd(
     target_is_normalized=target_is_normalized
     )
 
+print("\nOptimizing Weyl-absorbed circuit")
+# optimize weyl-absorbed circuit
+_, loss_weyl_abs = optimize_weyl_circuit_local_svd(
+    circuit_initial=init_circ_weyl_abs, mpo_ref=target_mpo,
+    num_sweeps=num_sweeps, layer_update_passes=layer_update_passes,
+    max_bondim_env=max_bondim_env, svd_cutoff=svd_cutoff,
+    target_is_normalized=target_is_normalized
+    )
+
 num_gates_vanilla_circ = init_circ.num_gates
 num_gates_weyl_circ = init_circ_weyl.num_gates
+num_gates_weyl_abs_circ = init_circ_weyl_abs.num_gates
 
 loss_vanilla = global_loss(loss_vanilla, n_sites, target_is_normalized)
 loss_weyl = global_loss(loss_weyl, n_sites, target_is_normalized)
+loss_weyl_abs = global_loss(loss_weyl_abs, n_sites, target_is_normalized)
 
 # save loss data
 base_dir = here = Path(__file__).resolve().parent
 save_data_npz(base_dir, 'loss_vanilla_circ', loss_vanilla, num_gates_vanilla_circ)
 save_data_npz(base_dir, 'loss_weyl_circ', loss_weyl, num_gates_weyl_circ )
-
+save_data_npz(base_dir, 'loss_weyl_abs_circ', loss_weyl_abs, num_gates_weyl_abs_circ)
 

@@ -1,4 +1,3 @@
-# update step for 
 from __future__ import annotations
 
 import rqcopt_mpo.jax_config
@@ -22,7 +21,6 @@ class RiemannianAdamState:
     m: jnp.ndarray          # (..., d, d) tangent momentum attached to *current* U
     v: jnp.ndarray          # (...,) scalar 2nd moment per gate
     # Optional: last parameters if you prefer a different transport policy
-    # last_U: jnp.ndarray   # not needed with "attach m to current U" policy
 
 class RiemannianAdam:
     """
@@ -114,11 +112,11 @@ class RiemannianAdam:
             denom = denom[..., None, None]
         Xi = - self.lr * (m_hat / denom)
 
-        # 5) Retract to the manifold to get the next parameters   [polar retraction, Eq. (5)]
-        U_next = retract_qr(U, Xi)
+        # 5) Retract to the manifold to get the next parameters (use polar for consistency with transport)
+        U_next = retract_polar(U, Xi)
 
         # 6) Transport momentum to the *new* tangent space for the next iteration  [Eq. (7)]
-        m_next, _ = transport_by_projection(U, Xi, m_hat)  # attach to U_next
+        m_next, _ = transport_by_projection(U, Xi, m)  # attach to U_next (same polar retraction)
         # Note: v is scalar; no transport required.
 
         new_state = RiemannianAdamState(step=t, m=m_next, v=v)
@@ -130,5 +128,4 @@ class RiemannianAdam:
             "lr_eff": self.lr / (jnp.sqrt(v_hat) + self.eps),  # (G,)
         }
         return U_next, new_state, stats
-
 

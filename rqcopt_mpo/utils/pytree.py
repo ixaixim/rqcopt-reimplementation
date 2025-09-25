@@ -145,15 +145,22 @@ def rotate_rz(theta: jnp.ndarray, meta: dict, dtype=jnp.complex128) -> jnp.ndarr
     return jnp.array(U)
 
 def rotate_rxx_ryy_rzz(theta: jnp.ndarray, meta: dict, dtype=jnp.complex128) -> jnp.ndarray:
-    # theta shape (1,)
+    """Reconstruct the Weyl entangler ``exp(i * scale * (a XX + b YY + c ZZ))``.
+
+    The incoming parameters are the canonical Weyl angles ``(a, b, c)`` generated
+    in :mod:`weyl_circuit_builder`.  The helper :func:`_rot_from_generator`
+    implements ``exp(-i * scale * θ * P)``; passing ``-P`` therefore produces the
+    required positive sign in the exponent.  The unitary is recovered up to a
+    global phase, matching the construction used during decomposition.
+    """
     if theta.shape[0] != 3:
         raise ValueError(f"Expected theta shape (3,), got {theta.shape}")
     scale = float(meta.get("exp_scale", 1.))
 
-    XX, YY, ZZ, I4 = _paulis_2q(dtype)
-    Ua = _rot_from_generator(theta[0], XX, scale, dtype)
-    Ub = _rot_from_generator(theta[1], YY, scale, dtype)
-    Uc = _rot_from_generator(theta[2], ZZ, scale, dtype)
+    XX, YY, ZZ, _ = _paulis_2q(dtype)
+    Ua = _rot_from_generator(theta[0], -XX, scale, dtype)
+    Ub = _rot_from_generator(theta[1], -YY, scale, dtype)
+    Uc = _rot_from_generator(theta[2], -ZZ, scale, dtype)
     U  = Ua @ Ub @ Uc
 
     return jnp.array(U)

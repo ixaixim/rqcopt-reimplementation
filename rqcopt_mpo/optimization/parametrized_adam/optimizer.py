@@ -17,6 +17,7 @@ def optimize(
     betas: tuple = (0.9, 0.999),
     eps: float = 1e-8,
     clip_grad_norm: float = None,
+    bias_correction: bool = True,
     max_steps: int = 1000,
     callback: Callable = None,
     init_vertical_sweep = "bottom-up",
@@ -27,7 +28,7 @@ def optimize(
     # TODO: init state m0, v0 to zeros. needs to have the same shape as the param vector 
     params_tree, meta_tree = extract_params_tree(circuit)
     # TODO: construct gate layout with contiguous slices? i.e. 
-    opt = Adam(lr, betas, eps, clip_grad_norm,)
+    opt = Adam(lr, betas, eps, clip_grad_norm, bias_correction)
     U = opt.prepare_layout_from_trees(params_tree, meta_tree)
     opt.register_param_grad("RX", param_grad_rx)
     opt.register_param_grad("RY", param_grad_ry)
@@ -68,4 +69,7 @@ def optimize(
 
     #     # compute loss
         loss = overlap_to_loss(overlap=overlap, kind='HST', n_sites=circuit.n_sites, normalize=reference_mpo.is_normalized) 
+        history.append(loss)
         print(f"Step: {it}, Loss: {loss}")
+    return history
+        
