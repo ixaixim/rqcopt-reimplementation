@@ -60,7 +60,8 @@ def optimize(
     """
     Train the circuit in-place and return the list of loss values.
 
-    A user-supplied `callback(step, loss, stats)` is invoked at every step.
+    A user-supplied callback is invoked at every step with keyword arguments
+    `step`, `loss`.
     """
 
     U1, U2, idx1, idx2 = build_buckets(circuit)
@@ -132,6 +133,12 @@ def optimize(
         # 1.5 bookkeeping
         history.append(loss)
 
-        # TODO: callback
+        if callback is not None:
+            should_stop = callback(
+                step=it,
+                loss=loss,
+            )
+            if should_stop:
+                return history
 
     return history

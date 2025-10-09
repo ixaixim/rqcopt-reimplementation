@@ -71,5 +71,16 @@ def optimize(
         loss = overlap_to_loss(overlap=overlap, kind='HST', n_sites=circuit.n_sites, normalize=reference_mpo.is_normalized) 
         history.append(loss)
         print(f"Step: {it}, Loss: {loss}")
+
+        if callback is not None:
+            should_stop = callback(
+                step=it,
+                loss=loss,
+                history=history,
+                stats=stats,
+                info=info,
+            )
+            if should_stop:
+                break
     return history
         

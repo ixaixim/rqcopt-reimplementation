@@ -67,6 +67,7 @@ def main():
     init_circ = weyl_decompose_circuit(init_circ, keep_global_phase=False)
     init_circ = absorb_single_qubit_layers(init_circ)
     init_circ = euler_zyz_decompose_circuit(init_circ, include_global_phase=False)
+    init_circ.print_gates()
     print(f"Init Circuit Decomposed with {init_circ.num_layers} layers")
     print(f"Initial Fidelity: {overlap_to_loss(np.trace(init_circ.to_matrix().conjugate().T @ target_circ.to_matrix()), n_sites=n_sites, normalize=target_is_normalized)}")
     

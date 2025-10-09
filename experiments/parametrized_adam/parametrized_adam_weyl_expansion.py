@@ -1,16 +1,28 @@
 import rqcopt_mpo.jax_config
-
 from pathlib import Path
+from experiments.utils import save_data_npz
 
+import jax 
 import jax.numpy as jnp
 import numpy as np
 
-from rqcopt_mpo.circuit.trotter.trotter_circuit_builder import trotterized_heisenberg_circuit
+# circuit and MPO:
+from rqcopt_mpo.circuit.circuit_dataclasses import Gate, GateLayer, Circuit
 from rqcopt_mpo.mpo.mpo_builder import circuit_to_mpo
-from rqcopt_mpo.optimization.riemannian_adam.optimizer import optimize
-from experiments.utils import save_data_npz
-from rqcopt_mpo.optimization.utils import overlap_to_loss
 
+# decomposition:
+from rqcopt_mpo.circuit.weyl_decomposition.weyl_circuit_builder import weyl_decompose_circuit
+from rqcopt_mpo.circuit.decompose.single_q_decompose import euler_zyz_decompose_circuit 
+
+# optimization: 
+from rqcopt_mpo.optimization.parametrized_adam_weyl_expansion.optimizer import optimize
+
+# trotterization:
+from rqcopt_mpo.circuit.trotter.trotter_circuit_builder import trotterized_heisenberg_circuit
+
+# debug
+from rqcopt_mpo.circuit.circuit_builder import generate_random_circuit
+from rqcopt_mpo.optimization.utils import overlap_to_loss
 
 # trotterization params
 n_sites = 8 # choose even number
@@ -25,7 +37,7 @@ dt = t/reps
 dtype = jnp.complex128
 target_is_normalized = False
 
-# set up target MPO
+# # set up target MPO
 target_circ = trotterized_heisenberg_circuit(    
     n_sites=n_sites, J=J, D=D, h=h,
     order=4, dt=dt, reps=reps,
@@ -53,14 +65,7 @@ init_circ = trotterized_heisenberg_circuit(
 print(f"Initial circuit with {init_circ.num_layers} layers")
 print(f"Initial Fidelity of Circuit: {overlap_to_loss(np.trace(init_circ.to_matrix().conjugate().T @ target_circ.to_matrix()), n_sites=n_sites, normalize=target_is_normalized)}")
 
-# # weyl decomp
-# init_circ = weyl_decompose_circuit(init_circ, keep_global_phase=False)
-# # euler rotation decomp
-# init_circ = euler_zyz_decompose_circuit(init_circ, include_global_phase=False)
-# print(f"Init Circuit Decomposed with {init_circ.num_layers} layers")
-# print(f"Initial Fidelity of Decomposed Circuit: {overlap_to_loss(np.trace(init_circ.to_matrix().conjugate().T @ target_circ.to_matrix()), n_sites=n_sites, normalize=target_is_normalized)}")
-
-# Optimization parameters
+# optimization parameters 
 lr = 1e-4
 betas = (0.9, 0.999)
 eps = 1e-8
@@ -69,8 +74,6 @@ bias_correction = True
 max_steps = 1000
 max_bondim_env = 128
 svd_cutoff = 0.0
-
-print("Optimizing brickwall circuit (Riemannian Adam)")
 
 patience = 10
 min_delta = 1e-6
@@ -91,20 +94,14 @@ def early_stop(*, step: int, loss: float, **_):
     return False
 
 
-# optimize circuit
-loss = optimize(
-    init_circ,
-    target_mpo,
-    lr=lr,
-    betas=betas,
-    eps=eps,
-    clip_grad_norm=clip_grad_norm,
-    max_steps=max_steps,
-    max_bondim_env=max_bondim_env,
-    svd_cutoff=svd_cutoff,
-    callback=early_stop,
-)
+loss = optimize(init_circ, target_mpo,
+        lr=lr, betas=betas, eps=eps,
+        clip_grad_norm=clip_grad_norm, 
+        bias_correction=bias_correction,
+        max_steps=max_steps,
+        max_bondim_env=max_bondim_env,
+        svd_cutoff=svd_cutoff,
+        callback=early_stop)
 
-# save loss data for plotting
-base_dir = here = Path(__file__).resolve().parent
-save_data_npz(base_dir, 'loss_riemannian', loss, method='Riemannian_Adam')
+base_dir = Path(__file__).resolve().parent
+save_data_npz(base_dir, 'loss_parametrized_adam_weyl', loss, method='Parametrized_Adam_Weyl')
