@@ -12,12 +12,12 @@ import jax.numpy as jnp
 ###############################################
 
 original_circ = trotterized_heisenberg_circuit(
-    n_sites=4,
+    n_sites=8,
     J=1.0,
     D=1.0,
     dt=0.1,
-    reps=2,
-    order=4,
+    reps=3,
+    order=2,
     dtype=jnp.complex128
 )
 original_circ.print_gates()
@@ -25,7 +25,7 @@ original_circ.print_gates()
 
 # original_circ is your 21-layer brickwall Circuit
 expanded = weyl_decompose_circuit(original_circ)
-expanded.print_gates(max_per_layer=4)   # should show 63 layers
+# expanded.print_gates(max_per_layer=4)   # should show 63 layers
 
 orig_U   = jnp.array(original_circ.to_matrix())
 expand_U = jnp.array(expanded.to_matrix())
@@ -41,6 +41,9 @@ print("✓ decomposition circuit reproduces the original")
 ###############################################
 
 compressed = absorb_single_qubit_layers(expanded)   # `expanded` is the 3 N circuit
+print("Compressed Circuit with single-q gates absorbtion")
+compressed.print_gates()
+
 print(f"{expanded.num_layers=},   {compressed.num_layers=}")   # 63   43  (≡ 2·21+1)
 
 # unitary equivalence (up to a global phase):

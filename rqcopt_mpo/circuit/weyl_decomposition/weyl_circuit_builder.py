@@ -170,6 +170,32 @@ def absorb_single_qubit_layers(weyl_circ: Circuit) -> Circuit:
     # ---- copy only the *last* single-qubit layer ---------------------
     _clone_layer(weyl_circ.layers[-1], new_idx)   # final K1
 
+    # post-processing loop that collapses boundary gates from every second layer. 
+    boundary_qubits = (first_q, last_q)
+    sorted_indices = sorted(new_layers)
+
+    for idx in sorted_indices:
+        if idx < 4 or idx % 4 != 0:
+            continue            # only layers 4, 8, 12, ...
+
+        prev_idx = idx - 2
+        if prev_idx not in new_layers:
+            continue
+
+        layer_now = new_layers[idx]
+        layer_prev = new_layers[prev_idx]
+
+        for qubit in boundary_qubits:
+            gate_now = next((g for g in layer_now.gates if g.qubits == (qubit,)), None)
+            gate_prev = next((g for g in layer_prev.gates if g.qubits == (qubit,)), None)
+            if gate_now is None or gate_prev is None:
+                continue
+
+            gate_prev.matrix = gate_now.matrix @ gate_prev.matrix
+            gate_prev.name = "Abs"
+            gate_prev.decomposition_part = "Abs"
+            layer_now.gates.remove(gate_now)
+            
     return Circuit(n_sites=n_sites,
                    layers=[new_layers[k] for k in sorted(new_layers)],
                    hamiltonian_type=weyl_circ.hamiltonian_type,
