@@ -1,0 +1,1 @@
+# the adam optimizer for an array. 

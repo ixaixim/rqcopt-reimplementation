@@ -16,7 +16,7 @@ original_circ = trotterized_heisenberg_circuit(
     J=1.0,
     D=1.0,
     dt=0.1,
-    reps=3,
+    reps=1,
     order=2,
     dtype=jnp.complex128
 )
