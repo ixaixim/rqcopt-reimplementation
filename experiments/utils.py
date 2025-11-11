@@ -100,6 +100,7 @@ def plot_all_losses(
 
     plt.xlabel("Iteration")
     plt.ylabel("Loss")
+    plt.yscale("log")
     plt.title("Loss vs. Iteration")
     plt.legend()
     plt.grid(True, linestyle="--", alpha=0.6)
@@ -110,6 +111,5 @@ def plot_all_losses(
 
     print(f"Saved plot to {fn}")
     return fn
-
 
 

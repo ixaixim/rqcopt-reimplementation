@@ -13,13 +13,13 @@ from rqcopt_mpo.optimization.utils import overlap_to_loss
 
 
 # trotterization params
-n_sites = 8 # choose even number
+n_sites = 10 # choose even number
 J = 1.0
-D = -1.0
+D = 1.5
 h = 0
-t = 0.5 # time of evolution
+t = 0.25 # time of evolution
 
-reps = 10
+reps = 10 # debug
 order = 4
 dt = t/reps
 dtype = jnp.complex128
@@ -40,13 +40,14 @@ target_mpo.left_canonicalize(normalize=target_is_normalized)
 
 reps = 3
 dt = t/reps
+order = 2
 init_circ = trotterized_heisenberg_circuit(
     n_sites=n_sites,
     J=J,
     D=D,
     dt=dt,
     reps=reps,
-    order=2,
+    order=order,
     dtype=jnp.complex128,
 )
 
@@ -61,19 +62,19 @@ print(f"Initial Fidelity of Circuit: {overlap_to_loss(np.trace(init_circ.to_matr
 # print(f"Initial Fidelity of Decomposed Circuit: {overlap_to_loss(np.trace(init_circ.to_matrix().conjugate().T @ target_circ.to_matrix()), n_sites=n_sites, normalize=target_is_normalized)}")
 
 # Optimization parameters
+max_steps = 1500
 lr = 1e-4
 betas = (0.9, 0.999)
 eps = 1e-8
 clip_grad_norm = None
 bias_correction = True
-max_steps = 1000
 max_bondim_env = 128
 svd_cutoff = 0.0
 
 print("Optimizing brickwall circuit (Riemannian Adam)")
 
 patience = 10
-min_delta = 1e-6
+min_delta = 1e-8
 best_loss = [np.inf]
 stalled_steps = [0]
 
@@ -107,4 +108,4 @@ loss = optimize(
 
 # save loss data for plotting
 base_dir = here = Path(__file__).resolve().parent
-save_data_npz(base_dir, 'loss_riemannian', loss, method='Riemannian_Adam')
+save_data_npz(base_dir, f'loss_riemannian_reps_{reps}', loss, method='Riemannian_Adam')
