@@ -1,0 +1,38 @@
+{
+  "name": "heisenberg_order4_r10",
+  "problem": {
+    "n_sites": 6,
+    "J": 1.0,
+    "D": -1.0,
+    "h": 0.0,
+    "time": 0.5,
+    "dtype": "complex128"
+  },
+  "target_mpo": {
+    "order": 4,
+    "reps": 10,
+    "canonicalize": "left",
+    "normalize": false
+  },
+  "init_circuit": {
+    "order": 2,
+    "reps": 2
+  },
+  "optimization": {
+    "max_steps": 2,
+    "max_bondim_env": 128,
+    "svd_cutoff": 0.0,
+    "optimizer": "weyl_abs",
+    "optimizer_params": {
+      "lr": 1e-4,
+      "betas": [
+        0.9,
+        0.999
+      ],
+      "eps": 1e-8,
+      "clip_grad_norm": null,
+      "bias_correction": true
+    }
+  },
+  "notes": "Order-4, 10-repetition Heisenberg MPO used as reference in Weyl absorption experiments."
+}
