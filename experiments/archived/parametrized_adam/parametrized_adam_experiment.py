@@ -15,7 +15,7 @@ from rqcopt_mpo.circuit.weyl_decomposition.weyl_circuit_builder import weyl_deco
 from rqcopt_mpo.circuit.decompose.single_q_decompose import euler_zyz_decompose_circuit 
 
 # optimization: 
-from rqcopt_mpo.optimization.parametrized_adam.optimizer import optimize
+from rqcopt_mpo.optimization.archived.parametrized_adam.optimizer import optimize
 
 # trotterization:
 from rqcopt_mpo.circuit.trotter.trotter_circuit_builder import trotterized_heisenberg_circuit

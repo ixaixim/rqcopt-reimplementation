@@ -7,41 +7,14 @@ from typing import Tuple
 import jax.numpy as jnp
 
 # Reuse tested primitives for rotations, Pauli matrices, and HST backprop
-from rqcopt_mpo.optimization.parametrized_adam.utils import (
-    _rot_from_generator,
-    _paulis_1q,
-    _paulis_2q,
-    _backprop_hst_loss,
-)
+from rqcopt_mpo.utils.rotations import _rot_from_generator, _paulis_1q, _paulis_2q, _backprop_hst_loss
+from rqcopt_mpo.utils.rotations import _compose_k_from_zyz, _compose_entangler
 
 
 # -----------------------------
 # Composition helpers
 # -----------------------------
 
-def _compose_k_from_zyz(theta: float, psi: float, phi: float, *, dtype) -> jnp.ndarray:
-    """
-    Return a single-qubit unitary K = Rz(theta) @ Ry(psi) @ Rz(phi),
-    where Rz/Ry use generator scaling 0.5 (matches existing code/tests).
-    """
-    _, Y, Z, _ = _paulis_1q(dtype)
-    Rz1 = _rot_from_generator(theta, Z, 0.5, dtype)
-    Ry  = _rot_from_generator(psi,   Y, 0.5, dtype)
-    Rz2 = _rot_from_generator(phi,   Z, 0.5, dtype)
-    return Rz1 @ Ry @ Rz2
-
-
-def _compose_entangler(a: float, b: float, c: float, *, dtype) -> jnp.ndarray:
-    """
-    Return the 2-qubit nonlocal unitary V = exp(i (a XX + b YY + c ZZ)).
-    Implemented via commuting factors using the same convention as
-    parametrized_adam (pass -P to _rot_from_generator for the +i sign).
-    """
-    XX, YY, ZZ, _ = _paulis_2q(dtype)
-    Ua = _rot_from_generator(a, -XX, 1.0, dtype)
-    Ub = _rot_from_generator(b, -YY, 1.0, dtype)
-    Uc = _rot_from_generator(c, -ZZ, 1.0, dtype)
-    return Ua @ Ub @ Uc
 
 
 def compose_weyl_unitary(theta15: jnp.ndarray, *, dtype) -> jnp.ndarray:

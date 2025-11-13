@@ -3,8 +3,8 @@ import rqcopt_mpo.jax_config
 from rqcopt_mpo.circuit.circuit_dataclasses import Gate, GateLayer, Circuit
 import jax.numpy as jnp
 from qiskit.synthesis import OneQubitEulerDecomposer
-from rqcopt_mpo.optimization.parametrized_adam.utils import _paulis_1q, _paulis_2q, _rot_from_generator, _backprop_hst_loss
-from rqcopt_mpo.optimization.parametrized_adam_weyl_expansion.utils import _compose_entangler, _compose_k_from_zyz
+from rqcopt_mpo.utils.rotations import _rot_from_generator, _paulis_1q, _paulis_2q, _backprop_hst_loss
+from rqcopt_mpo.utils.rotations import _compose_k_from_zyz, _compose_entangler
 
 
 

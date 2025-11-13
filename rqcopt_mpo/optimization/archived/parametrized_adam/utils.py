@@ -1,52 +1,9 @@
+from rqcopt_mpo.utils.rotations import _rot_from_generator, _paulis_1q, _paulis_2q, _backprop_hst_loss
+
 import rqcopt_mpo.jax_config
 import jax.numpy as jnp
 
-# z := Trace(U_ref^adj U_circ), i.e. complex holomorphic function (i.e. dz/dG*=0)
-# note: the loss is real: this also means (df/dz)* = df/dz*.
 
-# Let G = G(θ) with real θ. Then
-#
-#     dL/dθ = ∑_i ∑_j (∂L/∂G_ij) (dG_ij/dθ) + ∑_i ∑_j (∂L/∂Ḡ_ij) (dḠ_ij/dθ).
-#
-# Since L is holomorphic, we have ∂L/∂Ḡ = 0. Therefore, the differential reduces to
-#
-#     dL/dθ = ∑_i ∑_j (∂L/∂G_ij) (dG_ij/dθ) = Tr(∂L/∂G^T dG/dθ), which is the sum implemented as
-# 
-
-def _backprop_hst_loss(z, dz_dG, dG_dtheta, n_sites, is_normalized):
-    d = 2**n_sites
-    denom = d*d if not is_normalized else d
-    # implements  sum_{ij} (∂f/∂G_ij) * (dG_ij/dθ)
-    return -(2.0 / denom) * jnp.real(jnp.conjugate(z) * jnp.trace(dz_dG.T @ dG_dtheta)
-)  
-
-def _rot_from_generator(theta, P, scale, dtype):
-    # exp(-i * scale * theta * P) for an involutory P (P^2 = I)
-    c = jnp.cos(scale * theta)
-    s = jnp.sin(scale * theta)
-    I = jnp.eye(P.shape[0], dtype=dtype)
-    return c * I - 1j * s * P
-
-# Pauli 1q
-def _paulis_1q(dtype):
-    X = jnp.array([[0, 1],
-                   [1, 0]], dtype=dtype)
-    Y = jnp.array([[0, -1j],
-                   [1j, 0]], dtype=dtype)
-    Z = jnp.array([[1, 0],
-                   [0, -1]], dtype=dtype)
-    I = jnp.eye(2, dtype=dtype)
-    return X, Y, Z, I
-
-# Pauli 2q (tensor products)
-def _paulis_2q(dtype):
-    X, Y, Z, I2 = _paulis_1q(dtype)
-    kron = jnp.kron
-    XX = kron(X, X)
-    YY = kron(Y, Y)
-    ZZ = kron(Z, Z)
-    I4 = jnp.eye(4, dtype=dtype)
-    return XX, YY, ZZ, I4
 
 # ---------- RX / RY / RZ parameter-grad mappers ----------
 def param_grad_rx(theta: jnp.ndarray, dL_dG: jnp.ndarray, L, meta: dict, n_sites: int, is_normalized: bool) -> jnp.ndarray:

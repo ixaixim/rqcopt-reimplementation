@@ -5,12 +5,12 @@ import jax.numpy as jnp
 from rqcopt_mpo.circuit.circuit_dataclasses import Gate, GateLayer, Circuit
 from rqcopt_mpo.optimization.gradient import cost_and_euclidean_grad
 from rqcopt_mpo.mpo.mpo_dataclass import MPO
-from rqcopt_mpo.optimization.parametrized_adam.adam import Adam
+from rqcopt_mpo.optimization.weyl_optimizer.adam import Adam
 from rqcopt_mpo.utils.pytree import extract_params_tree
 from rqcopt_mpo.optimization.utils import overlap_to_loss
 
 from rqcopt_mpo.optimization.weyl_optimizer.utils import group_and_parametrize_circuit, param_grad_single, param_grad_weyl_abs
-from rqcopt_mpo.optimization.parametrized_adam_weyl_expansion.utils import _compose_entangler, _compose_k_from_zyz
+from rqcopt_mpo.utils.rotations import _compose_k_from_zyz, _compose_entangler
 
 # optimizer for weyl absorbed gates. 
 # assumption: brickwall circuit has been absorbed using: 
@@ -60,6 +60,7 @@ def _update_circuit_from_trees(circuit, params_tree, meta_tree) -> None:
             else:
                 gate.params = tuple(jnp.asarray(p, dtype=jnp.float64) for p in pieces)
 
+# TODO: check like in RieAdam, whether you should sweep from top or from bottom, from left or from right. It might be necessary to add an optimizer parameter for that.
 def optimize(
         circ: Circuit, 
         mpo_ref: MPO, 

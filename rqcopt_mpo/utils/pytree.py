@@ -6,7 +6,7 @@ import jax.numpy as jnp
 from jax import tree_util as jtu
 import numpy as np
 
-from rqcopt_mpo.optimization.parametrized_adam.utils import _rot_from_generator, _paulis_1q, _paulis_2q
+from rqcopt_mpo.utils.rotations import _rot_from_generator, _paulis_1q, _paulis_2q
 # NOTE: pytree technique might be slower, since we are making each parameter a leaf, i.e. an array. 
         # It might be smarter to have a whole array for at least each layer, thereby grouping the parameters.
 

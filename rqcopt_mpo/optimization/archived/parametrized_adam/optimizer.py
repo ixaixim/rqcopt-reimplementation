@@ -6,8 +6,8 @@ import numpy as np          # only for the final “scatter back” to the pytho
 from rqcopt_mpo.optimization.gradient import cost_and_euclidean_grad
 from rqcopt_mpo.utils.pytree import extract_params_tree, update_gate_params_inplace, tree_like_zeros    
 from rqcopt_mpo.optimization.utils import overlap_to_loss
-from rqcopt_mpo.optimization.parametrized_adam.adam import Adam
-from rqcopt_mpo.optimization.parametrized_adam.utils import param_grad_rx, param_grad_ry, param_grad_rz, param_grad_xxyyzz
+from rqcopt_mpo.optimization.weyl_optimizer.adam import Adam
+from rqcopt_mpo.optimization.archived.parametrized_adam.utils import param_grad_rx, param_grad_ry, param_grad_rz, param_grad_xxyyzz
 
 def optimize(    
     circuit,

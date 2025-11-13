@@ -6,7 +6,7 @@ import jax.numpy as jnp
 
 from rqcopt_mpo.optimization.gradient import cost_and_euclidean_grad
 from rqcopt_mpo.utils.pytree import extract_params_tree
-from rqcopt_mpo.optimization.parametrized_adam.adam import Adam
+from rqcopt_mpo.optimization.weyl_optimizer.adam import Adam
 from rqcopt_mpo.optimization.utils import overlap_to_loss
 
 from .utils import (

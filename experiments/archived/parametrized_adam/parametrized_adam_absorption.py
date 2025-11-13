@@ -16,7 +16,7 @@ from rqcopt_mpo.circuit.weyl_decomposition.weyl_circuit_builder import (
 from rqcopt_mpo.mpo.mpo_builder import circuit_to_mpo
 
 # optimizer
-from rqcopt_mpo.optimization.parametrized_adam.optimizer import optimize
+from rqcopt_mpo.optimization.archived.parametrized_adam.optimizer import optimize
 from rqcopt_mpo.optimization.utils import overlap_to_loss
 
 # save utilities
