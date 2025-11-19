@@ -1,77 +1,244 @@
 import rqcopt_mpo.jax_config
 
-from rqcopt_mpo.circuit.circuit_dataclasses import GateLayer, Circuit
-from qiskit.synthesis import TwoQubitBasisDecomposer
-from qiskit.quantum_info import Operator
+import numpy as np
+import jax.numpy as jnp
+from typing import Dict, List, Optional, Tuple
+
 from qiskit.circuit.library import CXGate
+from qiskit.quantum_info import Operator
+from qiskit.synthesis import TwoQubitBasisDecomposer
 
-# decomposes the given circuit into cnot gates, given a fixed fidelity threshold
-# absorbs the single qubit layer at one end (depending on how many cnots are present in the gate). 
-#   reduces degrees of freedom.
+from rqcopt_mpo.circuit.circuit_dataclasses import Circuit, Gate, GateLayer
+
+# Two-qubit basis decomposition that expands every gate into single-qubit
+# rotations and CNOTs. The decomposer is global to avoid re-instantiation.
 basis = CXGate()
-decomposer = TwoQubitBasisDecomposer(CXGate())
-def cnot_decompose_circuit(orig: Circuit, basis_fidelity: None) -> Circuit:
+decomposer = TwoQubitBasisDecomposer(basis)
+
+# note: qiskit uses little endian ordering: basis states are ordere as |q1q0> for 2 qubits;
+#       a gate on qubit 0 acts as I prod U.
+# we just switch indices in places when returning the dictionary in _decompose_gate_into_cnot_blocks
+def _embed_single_into_two(mat: np.ndarray, position: int, dtype) -> np.ndarray:
+    """Embed a single-qubit matrix on the lower (0) or upper (1) qubit."""
+    eye = np.eye(2, dtype=dtype)
+    if position == 0:
+        return np.kron(eye, mat)
+    if position == 1:
+        return np.kron(mat, eye)
+    raise ValueError(f"Invalid qubit position {position}")
+
+
+def _single_ops(
+    ops, dtype: np.dtype
+) -> Dict[int, np.ndarray]:
+    """Collapse a sequence of 1q instructions into per-qubit matrices."""
+    totals = {}
+    for instr in ops:
+        op = instr.operation
+        if op.num_qubits != 1:
+            raise ValueError("Expected single-qubit operation in this block.")
+        pos = instr.qubits[0]._index # with recent qiskit version, no other way to access index (would otherwise need to pass circ and then do circ.find_bit(instr.qubits[0]).index
+        totals[pos] = instr.matrix 
+    return totals
+
+def _build_two_qubit_block(
+    ops, dtype: np.dtype
+) -> np.ndarray:
+    """Collapse a sequence containing CNOTs and 1q rotations into a single 4x4 matrix."""
+    # TODO: will later also save the 
+    block = np.eye(4, dtype=dtype)
+    for instr in ops:
+        op = instr.operation
+        step = instr.matrix
+        if op.num_qubits == 1:
+            pos = instr.qubits[0]._index
+            step = _embed_single_into_two(step, pos, dtype)
+        elif op.num_qubits != 2:
+            raise ValueError("Instruction acting on more than two qubits.")
+        block = step @ block
+    return block
+
+
+def _decompose_gate_into_cnot_blocks(
+    gate: Gate, basis_fidelity: Optional[float]
+) -> Tuple[Dict[int, np.ndarray], np.ndarray, Dict[int, np.ndarray]]:
+    """Return (pre, middle, post) blocks for a two-qubit gate."""
+    if not gate.is_two_qubit():
+        raise ValueError("CNOT decomposition expects a two-qubit gate.")
+
+    # permute the matrix indices:
+
+    circ = decomposer(
+        Operator(np.array(gate.matrix, dtype=np.complex128)),
+        basis_fidelity=basis_fidelity,
+    )
+    instructions = list(circ.data)
+    cnot_indices = [
+        idx for idx, instr in enumerate(instructions) if instr.operation.num_qubits == 2
+    ]
+    if not cnot_indices:
+        raise ValueError("Basis decomposition did not produce any two-qubit gate.")
+    first, last = cnot_indices[0], cnot_indices[-1]
+    # TODO: add a check for printing: "gate on q: {gate.qubits} has {len(cnot_indices)} cnots."
+    dtype = gate.matrix.dtype
+
+    pre_ops = instructions[:first]
+    middle_ops = instructions[first : last + 1]
+    post_ops = instructions[last + 1 :]
+
+    pre = _single_ops(pre_ops, dtype)
+    middle = _build_two_qubit_block(middle_ops, dtype)
+    post = _single_ops(post_ops, dtype)
+
+    return (
+        {gate.qubits[pos]: pre[1-pos] for pos in range(2)},
+        middle,
+        {gate.qubits[pos]: post[1-pos] for pos in range(2)},
+    )
+
+
+def _add_single_gate(
+    layer: GateLayer,
+    qubit: int,
+    matrix: np.ndarray,
+    original_qubits: Tuple[int, int],
+    name: str,
+):
+    layer.add_gate(
+        Gate(
+            matrix=matrix,
+            qubits=(qubit,),
+            layer_index=layer.layer_index,
+            name=name,
+            decomposition_part=name,
+            original_gate_qubits=original_qubits,
+        )
+    )
+
+
+def _collect_next_layer_pre(
+    layer: GateLayer,
+    gate_decomp: Dict[int, Tuple[Dict[int, np.ndarray], np.ndarray, Dict[int, np.ndarray]]],
+) -> Dict[int, np.ndarray]:
+    """Return a {qubit: pre_matrix} map for the gates in the provided layer."""
+    if layer is None: return None
+    qubit_to_pre: Dict[int, np.ndarray] = {}
+    for gate in layer.iterate_gates():
+        pre, _, _ = gate_decomp[id(gate)]
+        qubit_to_pre.update(pre)
+    return qubit_to_pre
+
+
+def cnot_decompose_circuit(
+    orig: Circuit, basis_fidelity: Optional[float] = None
+) -> Dict[int, Tuple[Dict[int, np.ndarray], np.ndarray, Dict[int, np.ndarray]]]:
     """
-    Replace a two-qubit Gate into CNOT and arbitrary single qubit gates.
-    Absorbs the 1q gates of adjacent layers together to reduce free parameters. If 1q gate lies on the boundary, absorb with 1q gate of the next even layer.
-    Assumes brickwall layer, even num of qubits, and start with even layer (0-1, 2-3, (n-2)-(n-1)). 
+    Returns a lookup table that holds the decomposition of the gate.
     """
 
-    # we are mapping from a circuit with n layers to a circuit with n+1 layers,
-    #   the first layer is 1q gates, the other layers are parametrized 2q gates.
-    # new layer 
-    new_layers: dict[int, GateLayer] = {} 
-    layer = GateLayer()
-    prev_gate_list = # is a list of jnp.identity(2) 1q matrices 
-    idx = 0
-    for lay in orig.layers:
-        for g in lay.iterate_gates():
-            # decompose gate into cnot. 
-            circ = decomposer(Operator(g.matrix))
-            for instr in circ.data:
-                op = instr.operation # use to_matrix() to have the matrix
-                # count how many cnots.
-                cnot_num = 0
-                if op.num_qubits == 2: 
-                    cnot_num += 1
-                
-            # divide params within gate in three categories gr1, gr2 gr3, divide into the first and last single qubit gates before the first cnot and after the last cnot and all the gates in between the cnots (if only one cnot is present, this category contains only the single cnot).
-            gr1, gr2, gr3 = 
+    n_sites = orig.n_sites
+    gate_decomp = {}
+    for layer in sorted(orig.layers, key=lambda L: L.layer_index):
+        for gate in layer.iterate_gates():
+
+            pre, middle, post = _decompose_gate_into_cnot_blocks(gate, basis_fidelity)
+
+            # create a lookup table: for the gate id, associate the decomposition
+            gate_decomp[id(gate)] = (pre, middle, post)
+    return gate_decomp
+
+def cnot_absorb_1q_gates(
+        orig: Circuit, basis_fidelity: Optional[float] = None
+) -> Circuit: 
+    "Assumes brickwall circuit, starting with even layers"
+    sorted_layers = sorted(orig.layers, key=lambda layer: layer.layer_index)
+    n_qubits = orig.n_sites
+    new_layers: dict[int, GateLayer] = {}
+    new_layers[0] = GateLayer(
+        layer_index=0,
+        is_odd=sorted_layers[0].is_odd,
+        n_sites=orig.n_sites,
+        gates=[],
+    )
+    gate_decomp = cnot_decompose_circuit(orig, basis_fidelity)
+
+    # save first 1q layer:
+    for gate in sorted_layers[0].iterate_gates():
+        pre, _, _ = gate_decomp[id(gate)]
+        for qubit, matrix in pre.items():
+            _add_single_gate(new_layers[0], qubit, matrix, gate.qubits, name="pre")
+
+    for idx, layer in enumerate(sorted_layers[:-1]): 
             
-            # the very first layer is 1q gates
-            if idx == 0: 
-                layer.gates.append(gr1, idx = idx)
-                # save the other params for the next layer
-                idx +=1
-                layer.gates.append(matrix = gr2@gr3, params = params_gr2-gr3)
-                boundary_qubit_matrix = gr3
-                # increement lay
-                continue 
-            else:
-                # absorption: the previous idx gates absorb the new gr1 single q gates.
-                if qubits not 0 or n-1:
-                    previous_matrix = layer[idx-1].gate.matrix
-                    layer[idx-1].gate.matrix = gr1 @ previous_matrix
-                    layer[idx-1].gate.params = layer[idx-1].gate.params.append(params_gr1)
+        next_layer = sorted_layers[idx + 1] if idx + 1 < len(sorted_layers) else None
+        next_next_layer = sorted_layers[idx + 2] if idx + 2 < len(sorted_layers) else None
+        next_layer_pre = _collect_next_layer_pre(next_layer, gate_decomp) # for inner qubits absorption
+        next_next_layer_pre = _collect_next_layer_pre(next_next_layer, gate_decomp) # for boundary qubits absorbtion
 
-                if layer is even: 
-                    # absorb the boundary qubits:
-                    previous_matrix = layer[idx-2].gate.matrix
-                    layer[idx-2].gate.matrix = gr1 @ previous_matrix 
-                    layer[idx-2].gate.params = layer[idx-2].gate.params.append(params_gr1)
-
-                # save current matrix and params gate
-                layer.gates.append(matrix = gr2@gr3, params = params_gr2-gr3)
-                idx+=1
-                
-    return Circuit()
-
+        for gate in layer.iterate_gates():
         
-                
+            # if next_layer is None: # tackle last layer after loop
+            #     continue
 
-                
+            _, middle, post = gate_decomp[id(gate)]
+            first, second = gate.qubits
+            upper = next_layer_pre[first] @ post[first]  if first != 0 else next_next_layer_pre[first] @ post[first]
+            lower = next_layer_pre[second] @ post[second] if second != n_qubits-1 else next_next_layer_pre[second] @ post[second]
+            matrix = jnp.kron(upper, lower) @ middle
+            target = new_layers.setdefault(
+                layer.layer_index + 1,
+                GateLayer(layer_index=layer.layer_index + 1,
+                        is_odd=layer.is_odd,
+                        n_sites=orig.n_sites,
+                        gates=[]),
+            )
+            target.add_gate(
+                Gate(
+                    matrix=matrix,
+                    qubits=gate.qubits,
+                    layer_index=target.layer_index,
+                    name="Abs",
+                    decomposition_part="Abs",
+                    original_gate_qubits=gate.qubits,
+                )
+            )
+        
+    # todo: last layer
+    last_layer_idx = len(sorted_layers)-1
+    for gate in sorted_layers[-1].iterate_gates():
+        _, middle, post = gate_decomp[id(gate)]
+        first, second = gate.qubits
+        upper = post[first]
+        lower = post[second]
+        matrix = jnp.kron(upper, lower) @ middle
+        target = new_layers.setdefault(
+            last_layer_idx+1,
+            GateLayer(layer_index=last_layer_idx+1,
+                    is_odd=layer.is_odd,
+                    n_sites=orig.n_sites,
+                    gates=[]),
+        )
+        target.add_gate(
+            Gate(
+                matrix=matrix,
+                qubits=gate.qubits,
+                layer_index=target.layer_index,
+                name="Abs",
+                decomposition_part="Abs",
+                original_gate_qubits=gate.qubits,
+            )
+        )
+    # TODO: tackle when ending in odd layer (so far only even layer admitted.)
 
-         
 
 
-
+                    
+    # note the list should be long orig.num_layers+1
+    layer_list = [lay for lay in new_layers.values()]
+    return Circuit(
+        n_sites=orig.n_sites,
+        dtype=orig.dtype,
+        layers=layer_list,
+        hamiltonian_type=orig.hamiltonian_type,
+        trotter_params=orig.trotter_params,
+    )
