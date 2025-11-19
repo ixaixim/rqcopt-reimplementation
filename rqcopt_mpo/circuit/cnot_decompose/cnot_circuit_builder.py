@@ -177,9 +177,6 @@ def cnot_absorb_1q_gates(
 
         for gate in layer.iterate_gates():
         
-            # if next_layer is None: # tackle last layer after loop
-            #     continue
-
             _, middle, post = gate_decomp[id(gate)]
             first, second = gate.qubits
             upper = next_layer_pre[first] @ post[first]  if first != 0 else next_next_layer_pre[first] @ post[first]
@@ -203,7 +200,7 @@ def cnot_absorb_1q_gates(
                 )
             )
         
-    # todo: last layer
+    # last layer
     last_layer_idx = len(sorted_layers)-1
     for gate in sorted_layers[-1].iterate_gates():
         _, middle, post = gate_decomp[id(gate)]
