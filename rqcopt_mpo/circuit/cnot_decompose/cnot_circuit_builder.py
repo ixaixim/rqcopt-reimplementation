@@ -168,7 +168,9 @@ def cnot_absorb_1q_gates(
         for qubit, matrix in pre.items():
             _add_single_gate(new_layers[0], qubit, matrix, gate.qubits, name="pre")
 
-    for idx, layer in enumerate(sorted_layers[:-1]): 
+    last_layer = sorted_layers[-1]
+    iterate_up_to_idx = -1 if not last_layer.is_odd else -2 # if last layer is odd, we manually manage the last two layers
+    for idx, layer in enumerate(sorted_layers[:iterate_up_to_idx]): 
             
         next_layer = sorted_layers[idx + 1] if idx + 1 < len(sorted_layers) else None
         next_next_layer = sorted_layers[idx + 2] if idx + 2 < len(sorted_layers) else None
@@ -200,16 +202,47 @@ def cnot_absorb_1q_gates(
                 )
             )
         
-    # last layer
-    last_layer_idx = len(sorted_layers)-1
-    for gate in sorted_layers[-1].iterate_gates():
+    # second to last layer (to manage only if last_layer = odd)
+    if last_layer.is_odd:
+        layer = sorted_layers[-2]
+        next_layer = sorted_layers[-1]
+        next_layer_pre = _collect_next_layer_pre(next_layer, gate_decomp)
+
+        for gate in layer.iterate_gates():
+            
+            _, middle, post = gate_decomp[id(gate)]
+            first, second = gate.qubits
+            upper = next_layer_pre[first] @ post[first]  if first != 0 else post[first]
+            lower = next_layer_pre[second] @ post[second] if second != n_qubits-1 else post[second]
+            matrix = jnp.kron(upper, lower) @ middle
+            target = new_layers.setdefault(
+                layer.layer_index + 1,
+                GateLayer(layer_index=layer.layer_index + 1,
+                        is_odd=layer.is_odd,
+                        n_sites=orig.n_sites,
+                        gates=[]),
+            )
+            target.add_gate(
+                Gate(
+                    matrix=matrix,
+                    qubits=gate.qubits,
+                    layer_index=target.layer_index,
+                    name="Abs",
+                    decomposition_part="Abs",
+                    original_gate_qubits=gate.qubits,
+                )
+            )
+
+    # last layer (is independent of other gates)
+    last_layer_idx = last_layer.layer_index
+    for gate in last_layer.iterate_gates():
         _, middle, post = gate_decomp[id(gate)]
         first, second = gate.qubits
         upper = post[first]
         lower = post[second]
         matrix = jnp.kron(upper, lower) @ middle
         target = new_layers.setdefault(
-            last_layer_idx+1,
+            last_layer_idx + 1,
             GateLayer(layer_index=last_layer_idx+1,
                     is_odd=layer.is_odd,
                     n_sites=orig.n_sites,
@@ -225,11 +258,7 @@ def cnot_absorb_1q_gates(
                 original_gate_qubits=gate.qubits,
             )
         )
-    # TODO: tackle when ending in odd layer (so far only even layer admitted.)
-
-
-
-                    
+                     
     # note the list should be long orig.num_layers+1
     layer_list = [lay for lay in new_layers.values()]
     return Circuit(

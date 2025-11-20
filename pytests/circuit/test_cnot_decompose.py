@@ -32,9 +32,9 @@ def _build_reference_circuit() -> Circuit:
         n_sites=4,
         J=1.0,
         D=1.0,
-        dt=0.05,
-        reps=3,
-        order=1,
+        dt=2., # to do: try mulitples of pi/2,
+        reps=2,
+        order=1, # todo: try order 1 (i.e. ending in odd layer)
         dtype=jnp.complex128,
     )
 
@@ -67,6 +67,7 @@ def test_decompose_gate_into_cnot_blocks_reconstructs_unitary(unitary):
     _assert_same_unitaries(np.asarray(unitary, dtype=np.complex128), reconstructed)
 
 
+# TODO: investigate why for specific time steps it does not work (multiple of pi/2 time steps) probably bc the gate gets decomposed into fewer cnots?
 def test_cnot_absorb_1q_gates_preserves_unitary():
     """Check that absorbing 1q gates into 2q blocks leaves the circuit unitary unchanged."""
     orig = _build_reference_circuit()
