@@ -1,0 +1,9 @@
+jax
+jaxlib
+matplotlib
+numpy
+psutil
+PyYAML
+pytest
+qiskit
+scipy

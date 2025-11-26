@@ -178,10 +178,10 @@ scratchpad.txt
 *.png
 *.txt
 *.npz
+!requirements.txt
 
 # other
 trial.ipynb
 trial.py
 
 .vscode/
-

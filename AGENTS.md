@@ -1,8 +1,14 @@
 # Environment Configuration
 When executing Python scripts, ensure the temporary directory is defined and use the project virtual environment. 
-ALWAYS run the command using this exact prefix:
-
+ALWAYS run the command using this exact prefix (only if running from VS Code Extension, NOT from Codex CLI):
+If you want to run python:
 `export TMPDIR=/tmp && /home/neelmiscia/data/environments/rqcopt/bin/python3`
+
+If you want to run a pytest: 
+`export TMPDIR=/tmp /home/neelmiscia/data/environments/rqcopt/bin/pytest`
+
+**CLI Agents – Best Practice & Code Hygiene:**  
+When a question implies a structural change, weigh it against clean-code principles and real-world maintainability. Politeness is fine, but politeness ≠ automatic approval. If the idea adds clutter, coupling, or cleverness at the expense of clarity, say so—and propose a leaner alternative.
 
 # Brickwall circuit and general info
 often methods that handle quantum circuits are hardwired for brickwall circuits, or circuits with a specific structure. 
@@ -27,4 +33,7 @@ The code implements different ways of compressing a time evolution quantum circu
 # Tests:
 Pytest tests can be found in the pytests/ folder.
 The test/ folder contains instead some older tests, and tests that I want to run on the fly for quick checks.
+
+# Qiskit functions
+In case questions concern Functions that are inherited from Qiskit or Pennylane: read the online documentation for Qiskit and Pennylane.
 
