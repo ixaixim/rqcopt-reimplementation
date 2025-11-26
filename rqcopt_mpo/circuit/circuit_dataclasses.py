@@ -20,7 +20,8 @@ class Gate:
     # Optional metadata for clarity and tracking
     name: str = ""                # e.g., "ID", "RX", "CNOT", "K1l", "ExpXYZ", "K2r"
     params: Tuple[Any, ...] = field(default_factory=tuple) # e.g., rotation angle, or (a,b,c) for ExpXYZ 
-    
+    params_dict: dict = field(default_factory=dict)
+
     # --- Metadata specific to decomposed gates ---
     # Link back to the original 2-qubit gate it came from
     original_gate_qubits: Optional[Tuple[int, int]] = None 
@@ -99,6 +100,7 @@ class Gate:
         copied_matrix = self.matrix.copy()
 
         copied_params = copy.deepcopy(self.params)
+        copied_params_dict = copy.deepcopy(self.params_dict)
 
         new_gate = Gate(
             matrix=copied_matrix,
@@ -106,6 +108,7 @@ class Gate:
             layer_index=self.layer_index,
             name=self.name,
             params=copied_params,
+            params_dict=copied_params_dict,
             original_gate_qubits=self.original_gate_qubits,
             decomposition_part=self.decomposition_part
         )

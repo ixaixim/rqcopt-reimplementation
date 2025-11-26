@@ -28,7 +28,7 @@ target_is_normalized = False
 # set up target MPO
 target_circ = trotterized_heisenberg_circuit(    
     n_sites=n_sites, J=J, D=D, h=h,
-    order=4, dt=dt, reps=reps,
+    order=order, dt=dt, reps=reps,
     dtype=dtype
 )
 print(f"Target circuit with {target_circ.num_layers} layers")

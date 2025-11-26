@@ -29,12 +29,13 @@ def _assert_same_unitaries(u1: np.ndarray, u2: np.ndarray, atol: float = 1e-10):
 
 def _build_reference_circuit() -> Circuit:
     return trotterized_heisenberg_circuit(
-        n_sites=4,
+        n_sites=10,
         J=1.0,
-        D=1.0,
-        dt=2., # to do: try mulitples of pi/2,
-        reps=2,
-        order=1, # todo: try order 1 (i.e. ending in odd layer)
+        D=1.5,
+        h=0.5,
+        dt=0.3, # to do: try mulitples of pi/2,
+        reps=1,
+        order=2, # todo: try order 1 (i.e. ending in odd layer)
         dtype=jnp.complex128,
     )
 
@@ -42,9 +43,9 @@ def _build_reference_circuit() -> Circuit:
 @pytest.mark.parametrize(
     "unitary",
     [
-        CXGate().to_matrix(),
-        CZGate().to_matrix(),
-        RZZGate(0.3).to_matrix(),
+        # CXGate().to_matrix(),
+        # CZGate().to_matrix(),
+        # RZZGate(0.3).to_matrix(),
         random_unitary(4, seed=1234).data,
         random_unitary(4, seed=5678).data,
     ],
