@@ -5,10 +5,12 @@ from pathlib import Path
 import jax.numpy as jnp
 import numpy as np
 
+# MPO builder and circuits
 from rqcopt_mpo.mpo.mpo_builder import circuit_to_mpo
 from rqcopt_mpo.circuit.trotter.trotter_circuit_builder import trotterized_heisenberg_circuit
 from rqcopt_mpo.circuit.cnot_decompose.cnot_circuit_builder import cnot_absorb_1q_gates
 from rqcopt_mpo.optimization.cnot_optimizer.cnot_optimizer import optimize
+from rqcopt_mpo.optimization.utils import overlap_to_loss
 # from rqcopt_mpo.optimization.cnot_optimizer.utils import 
 
 # trotterization params
@@ -44,11 +46,17 @@ initial_circuit = trotterized_heisenberg_circuit(
 )
 print(f"Initial circuit with {initial_circuit.num_layers} layers")
 
+trace = np.trace(
+    target_circ.to_matrix().conjugate().T @ initial_circuit.to_matrix()
+)
+initial_loss = overlap_to_loss(trace, n_sites=n_sites, normalize=False)
+print(f"Initial loss (HST cost) without optimization: {initial_loss}")
+
 new_circ = cnot_absorb_1q_gates(initial_circuit) # matrices are grouped 
 new_circ.print_gates()
 
 # Optimization parameters (mirroring other experiments setup)
-max_steps = 20
+max_steps = 6
 lr = 1e-4
 betas = (0.9, 0.999)
 eps = 1e-8

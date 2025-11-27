@@ -1,9 +1,11 @@
 import rqcopt_mpo.jax_config
 
 from dataclasses import dataclass, field
+from pathlib import Path
+import json
 import numpy as np
 import jax.numpy as jnp
-from typing import Tuple, Optional, Any, List, Dict, Set, Iterator
+from typing import Tuple, Optional, Any, List, Dict, Set, Iterator, Union
 import copy
 import jax
 
@@ -240,6 +242,143 @@ class Circuit:
             trotter_params=copied_trotter_params
         )
         return new_circuit
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize the circuit into JSON-friendly Python primitives."""
+        dtype_str = str(np.dtype(self.dtype))
+
+        def _to_serializable(x):
+            if isinstance(x, jax.Array) or isinstance(x, np.ndarray):
+                arr = np.asarray(x)
+                if np.iscomplexobj(arr):
+                    return {"__complex_array__": True, "real": arr.real.tolist(), "imag": arr.imag.tolist()}
+                return arr.tolist()
+            if isinstance(x, (list, tuple)):
+                return [_to_serializable(v) for v in x]
+            if isinstance(x, dict):
+                return {k: _to_serializable(v) for k, v in x.items()}
+            if isinstance(x, complex):
+                return {"__complex__": True, "real": x.real, "imag": x.imag}
+            if isinstance(x, (np.generic,)):
+                return x.item()
+            return x
+
+        return {
+            "n_sites": self.n_sites,
+            "dtype": dtype_str,
+            "hamiltonian_type": self.hamiltonian_type,
+            "trotter_params": _to_serializable(copy.deepcopy(self.trotter_params)),
+            "layers": [
+                {
+                    "layer_index": layer.layer_index,
+                    "is_odd": layer.is_odd,
+                    "n_sites": layer.n_sites,
+                    "gates": [
+                        {
+                            "name": gate.name,
+                            "qubits": list(gate.qubits),
+                            "layer_index": gate.layer_index,
+                            "matrix": {
+                                "real": np.asarray(gate.matrix.real, dtype=np.float64).tolist(),
+                                "imag": np.asarray(gate.matrix.imag, dtype=np.float64).tolist(),
+                            },
+                            "params": _to_serializable(gate.params),
+                            "params_dict": _to_serializable(gate.params_dict),
+                            "original_gate_qubits": list(gate.original_gate_qubits)
+                            if gate.original_gate_qubits is not None else None,
+                            "decomposition_part": gate.decomposition_part,
+                        }
+                        for gate in layer.gates
+                    ],
+                }
+                for layer in self.layers
+            ],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Circuit':
+        """Rebuild a Circuit from the structure produced by `to_dict`."""
+        dtype = np.dtype(data.get("dtype", np.complex128))
+
+        def _restore_param(p):
+            if isinstance(p, dict) and p.get("__complex__"):
+                return complex(p.get("real", 0.0), p.get("imag", 0.0))
+            if isinstance(p, dict) and p.get("__complex_array__"):
+                real = np.asarray(p.get("real", []))
+                imag = np.asarray(p.get("imag", []))
+                return real + 1j * imag
+            if isinstance(p, list):
+                return np.asarray(p)
+            if isinstance(p, tuple):
+                return tuple(_restore_param(v) for v in p)
+            if isinstance(p, dict):
+                return {k: _restore_param(v) for k, v in p.items()}
+            if isinstance(p, jax.Array):
+                return np.asarray(p)
+            if isinstance(p, np.ndarray):
+                return p
+            return p
+
+        def _restore_params_list(raw):
+            if raw is None:
+                return ()
+            restored = _restore_param(raw)
+            if isinstance(restored, tuple):
+                return restored
+            if isinstance(restored, list):
+                return tuple(restored)
+            return (restored,)
+
+        layers: List[GateLayer] = []
+        for layer_data in data.get("layers", []):
+            gates: List[Gate] = []
+            for g in layer_data.get("gates", []):
+                orig_qubits = g.get("original_gate_qubits")
+                matrix_data = g["matrix"]
+                if isinstance(matrix_data, dict) and "real" in matrix_data and "imag" in matrix_data:
+                    matrix = np.asarray(matrix_data["real"], dtype=dtype) + 1j * np.asarray(
+                        matrix_data["imag"], dtype=dtype
+                    )
+                else:
+                    matrix = np.asarray(matrix_data, dtype=dtype)
+                gates.append(
+                    Gate(
+                        matrix=matrix,
+                        qubits=tuple(g["qubits"]),
+                        layer_index=g["layer_index"],
+                        name=g.get("name", ""),
+                        params=_restore_params_list(g.get("params", ())),
+                        params_dict=_restore_param(copy.deepcopy(g.get("params_dict", {}))),
+                        original_gate_qubits=tuple(orig_qubits) if orig_qubits is not None else None,
+                        decomposition_part=g.get("decomposition_part"),
+                    )
+                )
+            layers.append(
+                GateLayer(
+                    layer_index=layer_data["layer_index"],
+                    is_odd=layer_data["is_odd"],
+                    gates=gates,
+                    n_sites=layer_data.get("n_sites"),
+                )
+            )
+        return cls(
+            n_sites=data["n_sites"],
+            dtype=dtype,
+            layers=layers,
+            hamiltonian_type=data.get("hamiltonian_type"),
+            trotter_params=_restore_param(copy.deepcopy(data.get("trotter_params"))),
+        )
+
+    def save_json(self, path: Union[str, Path], indent: int = 2) -> None:
+        """Persist the circuit to a JSON file."""
+        path = Path(path)
+        path.write_text(json.dumps(self.to_dict(), indent=indent))
+
+    @classmethod
+    def load_json(cls, path: Union[str, Path]) -> 'Circuit':
+        """Load a circuit saved with `save_json`."""
+        path = Path(path)
+        return cls.from_dict(json.loads(path.read_text()))
     
     def to_matrix(self) -> jnp.ndarray:
         self.sort_layers()
@@ -284,4 +423,3 @@ class Circuit:
     # def compress(self, ...)
     # def apply_to_state(self, ...)
     # def contract_layers(self, ...)
-

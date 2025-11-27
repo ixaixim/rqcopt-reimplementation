@@ -13,10 +13,14 @@ from experiments.utils import (  # noqa: E402
     load_experiment_config,
     load_optimization_setup,
     OptimizationSetup,
+    save_run_outputs,
 )
 from rqcopt_mpo.circuit.weyl_decomposition.weyl_circuit_builder import (  # noqa: E402
     weyl_decompose_circuit,
     absorb_single_qubit_layers,
+)
+from rqcopt_mpo.circuit.cnot_decompose.cnot_circuit_builder import (  # noqa: E402
+    cnot_absorb_1q_gates,
 )
 from rqcopt_mpo.optimization.weyl_optimizer.weyl_abs_optimizer import (  # noqa: E402
     optimize as optimize_weyl_absorption,
@@ -24,6 +28,9 @@ from rqcopt_mpo.optimization.weyl_optimizer.weyl_abs_optimizer import (  # noqa:
 
 from rqcopt_mpo.optimization.riemannian_adam.optimizer import (  # noqa: E402
     optimize as optimize_riemannian_adam,
+)
+from rqcopt_mpo.optimization.cnot_optimizer.cnot_optimizer import (  # noqa: E402
+    optimize as optimize_cnot,
 )
 
 def parse_args() -> argparse.Namespace:
@@ -50,6 +57,9 @@ def run_experiment(cfg_path: Path) -> None:
     target_mpo = build_target_mpo_from_config(cfg)
     init_circ = build_initial_circuit_from_config(cfg)
     opt_setup = load_optimization_setup(cfg)
+    # Allow explicit output name in config; fall back to experiment name or filename stem.
+    run_name = cfg.get("save_name", cfg.get("name", cfg_path.stem))
+    base_dir = Path(__file__).resolve().parent
 
 
     print(f"Loaded config '{cfg.get('name', cfg_path.stem)}'")
@@ -60,15 +70,26 @@ def run_experiment(cfg_path: Path) -> None:
 
     if opt_setup.name == "weyl_abs":
         circuit = _prepare_weyl_abs_circuit(init_circ)
-        loss_history = _run_weyl_absorption(circuit, target_mpo, opt_setup)
+        circuit, loss_history = _run_weyl_absorption(circuit, target_mpo, opt_setup)
     elif opt_setup.name == "riemannian_adam":
-        loss_history = _run_riemannian_adam(init_circ, target_mpo, opt_setup)
+        circuit, loss_history = _run_riemannian_adam(init_circ, target_mpo, opt_setup)
+    elif opt_setup.name == "cnot":
+        circuit = _prepare_cnot_circuit(init_circ)
+        circuit, loss_history = _run_cnot_optimizer(circuit, target_mpo, opt_setup)
     else:
         raise NotImplementedError(f"Unsupported optimizer '{opt_setup.name}'.")
 
     print(f"Finished optimization, {len(loss_history)} steps.")
     if loss_history:
         print(f"Final loss: {loss_history[-1]}")
+    save_run_outputs(
+        base_dir,
+        run_name,
+        circuit,
+        loss_history,
+        num_gates=circuit.num_gates,
+        method=opt_setup.name,
+    )
 
 def _prepare_weyl_abs_circuit(init_circ):
     circ = init_circ.copy()
@@ -76,7 +97,7 @@ def _prepare_weyl_abs_circuit(init_circ):
     circ = absorb_single_qubit_layers(circ)
     return circ
 
-def _run_weyl_absorption(circuit, target_mpo, opt_setup: OptimizationSetup) -> None:
+def _run_weyl_absorption(circuit, target_mpo, opt_setup: OptimizationSetup):
     params = opt_setup.optimizer_params
     betas = _as_tuple(params.get("betas"))
 
@@ -96,6 +117,7 @@ def _run_weyl_absorption(circuit, target_mpo, opt_setup: OptimizationSetup) -> N
 def _run_riemannian_adam(circuit, target_mpo, opt_setup: OptimizationSetup):
     params = opt_setup.optimizer_params
     betas = _as_tuple(params.get("betas"))
+    circuit = circuit.copy()
     return optimize_riemannian_adam(
         circuit,
         target_mpo,
@@ -107,6 +129,26 @@ def _run_riemannian_adam(circuit, target_mpo, opt_setup: OptimizationSetup):
         max_bondim_env=opt_setup.max_bondim_env,
         svd_cutoff=opt_setup.svd_cutoff,
         callback=None,
+        init_vertical_sweep=params.get("init_vertical_sweep", "top-down"),
+    )
+
+def _prepare_cnot_circuit(init_circ):
+    return cnot_absorb_1q_gates(init_circ.copy())
+
+def _run_cnot_optimizer(circuit, target_mpo, opt_setup: OptimizationSetup):
+    params = opt_setup.optimizer_params
+    betas = _as_tuple(params.get("betas"))
+    return optimize_cnot(
+        circuit,
+        target_mpo,
+        max_steps=opt_setup.max_steps,
+        max_bondim_env=opt_setup.max_bondim_env,
+        svd_cutoff=opt_setup.svd_cutoff,
+        lr=params.get("lr", 1e-3),
+        betas=betas,
+        eps=params.get("eps", 1e-8),
+        clip_grad_norm=params.get("clip_grad_norm"),
+        bias_correction=params.get("bias_correction", True),
         init_vertical_sweep=params.get("init_vertical_sweep", "top-down"),
     )
 

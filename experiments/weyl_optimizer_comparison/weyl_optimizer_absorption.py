@@ -82,7 +82,7 @@ weyl_circ.print_gates()
 
 
 # optimize
-loss = optimize(
+circ, loss = optimize(
     weyl_circ, 
     mpo_ref=target_mpo, 
     lr=lr, betas=betas, eps=eps,

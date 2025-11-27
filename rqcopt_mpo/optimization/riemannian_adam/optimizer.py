@@ -139,6 +139,6 @@ def optimize(
                 loss=loss,
             )
             if should_stop:
-                return history
+                return circuit, history
 
-    return history
+    return circuit, history

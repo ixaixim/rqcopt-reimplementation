@@ -1,39 +1,40 @@
 {
-  "name": "heisenberg_order4_r10_riemannian",
-  "save_name": "heisenberg_order4_r10_riemannian",
+  "name": "heisenberg_cnot_order4_r5",
+  "save_name": "cnot_heisenberg_r5",
   "problem": {
     "n_sites": 8,
-    "J": 1.0,
-    "D": -0.5,
-    "h": -0.5,
-    "time": 0.5,
+    "J": 0.0,
+    "D": 1.5,
+    "h": 0.0,
+    "time": 2.0,
     "dtype": "complex128"
   },
   "target_mpo": {
     "order": 4,
-    "reps": 10,
+    "reps": 5,
     "canonicalize": "left",
-    "normalize": true
+    "normalize": false
   },
   "init_circuit": {
     "order": 2,
     "reps": 3
   },
   "optimization": {
-    "max_steps": 2,
+    "max_steps": 6,
     "max_bondim_env": 128,
     "svd_cutoff": 0.0,
-    "optimizer": "riemannian_adam",
+    "optimizer": "cnot",
     "optimizer_params": {
-      "lr": 1e-4,
+      "lr": 1e-5,
       "betas": [
         0.9,
         0.999
       ],
       "eps": 1e-8,
       "clip_grad_norm": null,
+      "bias_correction": true,
       "init_vertical_sweep": "top-down"
     }
   },
-  "notes": "Riemannian Adam benchmark using brickwall circuit."
+  "notes": "CNOT-absorbed optimization with Adam over absorbed three-CNOT blocks; n=6 chain, order-4 target, order-2 init."
 }

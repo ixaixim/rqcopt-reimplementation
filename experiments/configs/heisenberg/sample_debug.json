@@ -1,5 +1,6 @@
 {
   "name": "debug",
+  "save_name": "experiment_name",
   "problem": {
     "n_sites": 6,
     "J": 1.0,

@@ -131,7 +131,7 @@ def optimize(
             if should_stop:
                 break
 
-    return history 
+    return new_circ, history 
 
     
 

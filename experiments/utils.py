@@ -141,6 +141,39 @@ def save_data_npz(
     # NOTE: for later runs, consider adding a time stamp
     # np.save(fn, floats)
 
+
+def save_run_outputs(
+    base_dir: Path,
+    run_name: str,
+    circuit: Circuit,
+    loss: list[float],
+    num_gates: Optional[int] = None,
+    method: Optional[str] = None,
+) -> dict[str, Path]:
+    """
+    Save loss history and circuit JSON into a dedicated run directory.
+
+    Returns:
+        Mapping of artifact names to their paths.
+    """
+    run_dir = base_dir / "data" / run_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    loss_data = {"loss": np.array(loss, dtype=float)}
+    if num_gates is not None:
+        loss_data["num_gates"] = np.array(num_gates, dtype=int)
+    if method is not None:
+        loss_data["method"] = np.array(method)
+
+    loss_path = run_dir / "loss.npz"
+    circuit_path = run_dir / "circuit.json"
+
+    np.savez(loss_path, **loss_data)
+    circuit.save_json(circuit_path)
+
+    print(f"Saved loss to {loss_path} and circuit to {circuit_path}")
+    return {"loss": loss_path, "circuit": circuit_path}
+
 def load_all_npz(data_dir: Path):
     """
     Load all .npz files from a given data/ directory.

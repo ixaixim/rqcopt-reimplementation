@@ -1,5 +1,6 @@
 {
   "name": "heisenberg_order4_r10",
+  "save_name": "heisenberg_order4_r10",
   "problem": {
     "n_sites": 6,
     "J": 1.0,

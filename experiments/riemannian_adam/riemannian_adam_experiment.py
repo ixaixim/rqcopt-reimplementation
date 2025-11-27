@@ -19,7 +19,7 @@ D = 1.5
 h = 0
 t = 0.25 # time of evolution
 
-reps = 10 # debug
+reps = 4 # debug
 order = 4
 dt = t/reps
 dtype = jnp.complex128
@@ -62,7 +62,7 @@ print(f"Initial Fidelity of Circuit: {overlap_to_loss(np.trace(init_circ.to_matr
 # print(f"Initial Fidelity of Decomposed Circuit: {overlap_to_loss(np.trace(init_circ.to_matrix().conjugate().T @ target_circ.to_matrix()), n_sites=n_sites, normalize=target_is_normalized)}")
 
 # Optimization parameters
-max_steps = 1500
+max_steps = 20 #debug
 lr = 1e-4
 betas = (0.9, 0.999)
 eps = 1e-8
@@ -93,7 +93,7 @@ def early_stop(*, step: int, loss: float, **_):
 
 
 # optimize circuit
-loss = optimize(
+circ, loss = optimize(
     init_circ,
     target_mpo,
     lr=lr,

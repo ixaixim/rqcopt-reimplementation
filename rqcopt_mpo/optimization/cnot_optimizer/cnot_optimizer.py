@@ -99,6 +99,6 @@ def optimize(
                 loss=loss,
             )
             if should_stop:
-                break
+                return new_circ, history
 
-    return history 
+    return new_circ, history 
