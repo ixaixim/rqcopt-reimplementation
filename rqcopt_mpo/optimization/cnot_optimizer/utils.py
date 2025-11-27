@@ -41,7 +41,7 @@ def _update_circuit_from_trees(circuit, params_tree, meta_tree) -> None:
                 start = stop
 
             name = meta["name"]
-            if name == "Abs":
+            if name == "CNOT_block":
                 if len(pieces) != 5:
                     raise ValueError(f"Abs gate expects 5 parameter blocks, got {len(pieces)}")
                 d = jnp.asarray(pieces[0], dtype=jnp.float64).item()
@@ -172,8 +172,20 @@ def param_grad_cnot_abs(
 ) -> jnp.ndarray:
     """
     Chain rule for the absorbed 3-CNOT block with nine parameters:
-    (d, b, a, upper_phi, upper_theta, upper_lambda, lower_phi, lower_theta, lower_lambda).
-    The middle circuit is CNOT(1->0) · RZ0(d) · RY1(b) · CNOT(0->1) · RY1(a) · CNOT(1->0),
+    (d, b, a, upper_phi, upper_theta, upper_lambda, lower_phi, lower_theta, lower_lambda), where
+    `d` is the RZ angle on qubit 0, `b` is the first RY on qubit 1, and `a` is the second RY on qubit 1.
+    The middle circuit operation is:
+    C ⊗ D (CNOT(1->0) I ⊗ RY(a) CNOT(0->1) ⊗ RY(b) RZ(d) CNOT(1->0))
+    
+
+    in ASCII notation:
+            +-------+                     +---+
+q_0:(+)-----| Rz(d) |----*-----------(+)--| C |--
+     |      +-------+    |            |   +---+
+     |      +-------+    |  +-------+ |   +---+
+q_1: *------| Ry(b) |---(+)--| Ry(a) |-*--| D |--
+            +-------+        +-------+    +---+
+
     dressed by kron(K_upper, K_lower) where each K is ZYZ.
     """
     dtype = dL_dG.dtype
@@ -211,7 +223,7 @@ def param_grad_cnot_abs(
     dKl_dth = Rz_lo_1 @ drot_y(lo_th) @ Rz_lo_2
     dKl_dlam = Rz_lo_1 @ Ry_lo @ drot_z(lo_lam)
 
-    # central rotations
+    # central rotations 
     Rz0 = rot_z(d)
     Ry_b = rot_y(b)
     Ry_a = rot_y(a)

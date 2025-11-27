@@ -19,7 +19,7 @@ h = 0
 t = 0.25 # time of evolution
 
 reps = 5 # debug
-order = 2
+order = 4
 dt = t/reps
 dtype = jnp.complex128
 target_is_normalized = False
@@ -34,7 +34,7 @@ print(f"Target circuit with {target_circ.num_layers} layers")
 target_mpo = circuit_to_mpo(target_circ)
 
 reps = 3 # debug
-order = 1
+order = 2
 dt = t/reps
 
 initial_circuit = trotterized_heisenberg_circuit(    
@@ -49,7 +49,7 @@ new_circ.print_gates()
 
 # Optimization parameters (mirroring other experiments setup)
 max_steps = 20
-lr = 1e-3
+lr = 1e-4
 betas = (0.9, 0.999)
 eps = 1e-8
 clip_grad_norm = None

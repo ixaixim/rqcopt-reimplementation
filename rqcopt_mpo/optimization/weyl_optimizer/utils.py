@@ -111,10 +111,10 @@ def param_grad_weyl_abs(
 ) -> jnp.ndarray:
     """
     Map Euclidean gradient dL/dG for a 2-qubit gate to dL/dtheta for the 9D
-    Weyl parameterization U = V (Kl ⊗ Kr).
+    Weyl parameterization U =(Kl ⊗ Kr) V .
     where V is the SU(4) entangler
 
-    Parameter ordering: (a,b,c, t1,p1,f1, t2,p2,f2)
+    Parameter ordering: (a,b,c, t1,p1,f1, t2,p2,f2) (as they appear in the circuit diagram)
     with K = Rz(t) @ Ry(p) @ Rz(f), scales 0.5 for 1q.
     """
     dtype = dL_dG.dtype

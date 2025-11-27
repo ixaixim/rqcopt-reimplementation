@@ -4,8 +4,10 @@ ALWAYS run the command using this exact prefix (only if running from VS Code Ext
 If you want to run python:
 `export TMPDIR=/tmp && /home/neelmiscia/data/environments/rqcopt/bin/python3`
 
+
 If you want to run a pytest: 
 `export TMPDIR=/tmp /home/neelmiscia/data/environments/rqcopt/bin/pytest`
+if any of those two commands returns error because of the tmp folder, just run the command without exporting TMPDIR.
 
 **CLI Agents – Best Practice & Code Hygiene:**  
 When a question implies a structural change, weigh it against clean-code principles and real-world maintainability. Politeness is fine, but politeness ≠ automatic approval. If the idea adds clutter, coupling, or cleverness at the expense of clarity, say so—and propose a leaner alternative.
