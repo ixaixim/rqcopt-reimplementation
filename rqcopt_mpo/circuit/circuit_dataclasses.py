@@ -257,8 +257,8 @@ class Circuit:
                 return [_to_serializable(v) for v in x]
             if isinstance(x, dict):
                 return {k: _to_serializable(v) for k, v in x.items()}
-            if isinstance(x, complex):
-                return {"__complex__": True, "real": x.real, "imag": x.imag}
+            # if isinstance(x, complex): # todo probably need to eliminate (no other complex python metadata is present)
+            #     return {"__complex__": True, "real": x.real, "imag": x.imag}
             if isinstance(x, (np.generic,)):
                 return x.item()
             return x
@@ -301,8 +301,8 @@ class Circuit:
         dtype = np.dtype(data.get("dtype", np.complex128))
 
         def _restore_param(p):
-            if isinstance(p, dict) and p.get("__complex__"):
-                return complex(p.get("real", 0.0), p.get("imag", 0.0))
+            # if isinstance(p, dict) and p.get("__complex__"):
+            #     return complex(p.get("real", 0.0), p.get("imag", 0.0))
             if isinstance(p, dict) and p.get("__complex_array__"):
                 real = np.asarray(p.get("real", []))
                 imag = np.asarray(p.get("imag", []))
