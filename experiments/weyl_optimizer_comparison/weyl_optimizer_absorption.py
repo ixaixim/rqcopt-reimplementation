@@ -14,7 +14,7 @@ from experiments.utils import save_data_npz
 # parameters: model
 n_sites = 10 # choose even number
 J = 1.0
-D = 1.5
+D = -0.5
 h = 0
 t = 0.25 # time of evolution
 

@@ -5,7 +5,7 @@ from pathlib import Path
 import jax.numpy as jnp
 import numpy as np
 
-from rqcopt_mpo.circuit.trotter.trotter_circuit_builder import trotterized_heisenberg_circuit
+from rqcopt_mpo.circuit.trotter.trotter_circuit_builder import trotterized_heisenberg_circuit, trotterized_xyz_circuit
 from rqcopt_mpo.mpo.mpo_builder import circuit_to_mpo
 from rqcopt_mpo.optimization.riemannian_adam.optimizer import optimize
 from experiments.utils import save_data_npz
@@ -15,22 +15,28 @@ from rqcopt_mpo.optimization.utils import overlap_to_loss
 # trotterization params
 n_sites = 10 # choose even number
 J = 1.0
-D = 1.5
-h = 0
+D = -0.5
+h = 0.75
 t = 0.25 # time of evolution
 
-reps = 4 # debug
+reps = 10 # debug
 order = 4
 dt = t/reps
 dtype = jnp.complex128
 target_is_normalized = False
 
 # set up target MPO
-target_circ = trotterized_heisenberg_circuit(    
-    n_sites=n_sites, J=J, D=D, h=h,
+# target_circ = trotterized_heisenberg_circuit(    
+#     n_sites=n_sites, J=J, D=D, h=h,
+#     order=order, dt=dt, reps=reps,
+#     dtype=dtype
+# )
+target_circ = trotterized_xyz_circuit(    
+    n_sites=n_sites, Jx=J, Jy=J, Jz=D, hx=h,
     order=order, dt=dt, reps=reps,
     dtype=dtype
 )
+
 print(f"Target circuit with {target_circ.num_layers} layers")
 
 target_mpo = circuit_to_mpo(target_circ)
@@ -41,15 +47,21 @@ target_mpo.left_canonicalize(normalize=target_is_normalized)
 reps = 3
 dt = t/reps
 order = 2
-init_circ = trotterized_heisenberg_circuit(
-    n_sites=n_sites,
-    J=J,
-    D=D,
-    dt=dt,
-    reps=reps,
-    order=order,
-    dtype=jnp.complex128,
+# init_circ = trotterized_heisenberg_circuit(
+#     n_sites=n_sites,
+#     J=J,
+#     D=D,
+#     dt=dt,
+#     reps=reps,
+#     order=order,
+#     dtype=jnp.complex128,
+# )
+init_circ = trotterized_xyz_circuit(    
+    n_sites=n_sites, Jx=J, Jy=J, Jz=D, hx=h,
+    order=order, dt=dt, reps=reps,
+    dtype=dtype
 )
+
 
 print(f"Initial circuit with {init_circ.num_layers} layers")
 print(f"Initial Fidelity of Circuit: {overlap_to_loss(np.trace(init_circ.to_matrix().conjugate().T @ target_circ.to_matrix()), n_sites=n_sites, normalize=target_is_normalized)}")
@@ -62,7 +74,7 @@ print(f"Initial Fidelity of Circuit: {overlap_to_loss(np.trace(init_circ.to_matr
 # print(f"Initial Fidelity of Decomposed Circuit: {overlap_to_loss(np.trace(init_circ.to_matrix().conjugate().T @ target_circ.to_matrix()), n_sites=n_sites, normalize=target_is_normalized)}")
 
 # Optimization parameters
-max_steps = 20 #debug
+max_steps = 1500 #debug
 lr = 1e-4
 betas = (0.9, 0.999)
 eps = 1e-8
@@ -107,5 +119,6 @@ circ, loss = optimize(
 )
 
 # save loss data for plotting
+lr_tag = f"{lr:.0e}".replace(".", "p")
 base_dir = here = Path(__file__).resolve().parent
-save_data_npz(base_dir, f'loss_riemannian_reps_{reps}', loss, method='Riemannian_Adam')
+save_data_npz(base_dir, f'loss_riemannian_reps_{reps}_lr_{lr_tag}', loss, method='Riemannian_Adam')
