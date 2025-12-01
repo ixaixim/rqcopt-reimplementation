@@ -9,6 +9,7 @@ from rqcopt_mpo.utils.rotations import (
     _compose_k_from_zyz,
     _paulis_1q,
     _rot_from_generator,
+    _d_rot_from_generator
 )
 
 
@@ -131,14 +132,6 @@ q_1: *------| Ry(b) |---(+)--| Ry(c) |-*--| D |--
     return circ
 
 
-def _d_rot_from_generator(theta, P, scale, dtype):
-    """Derivative of _rot_from_generator wrt theta."""
-    c = jnp.cos(scale * theta)
-    s = jnp.sin(scale * theta)
-    I = jnp.eye(P.shape[0], dtype=dtype)
-    return -scale * s * I - 1j * scale * c * P
-
-
 def _cnot_matrices(dtype):
     """Return (CNOT_01, CNOT_10) using (q0, q1) ordering."""
     cnot_01 = jnp.array(
@@ -174,7 +167,7 @@ def param_grad_cnot_abs(
     Chain rule for the absorbed 3-CNOT block with nine parameters:
     (d, b, a, upper_phi, upper_theta, upper_lambda, lower_phi, lower_theta, lower_lambda), where
     `d` is the RZ angle on qubit 0, `b` is the first RY on qubit 1, and `a` is the second RY on qubit 1.
-    The middle circuit operation is:
+    The circuit operation is:
     C ⊗ D (CNOT(1->0) I ⊗ RY(a) CNOT(0->1) ⊗ RY(b) RZ(d) CNOT(1->0))
     
 

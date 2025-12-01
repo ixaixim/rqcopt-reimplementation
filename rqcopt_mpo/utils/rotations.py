@@ -28,6 +28,13 @@ def _rot_from_generator(theta, P, scale, dtype):
     I = jnp.eye(P.shape[0], dtype=dtype)
     return c * I - 1j * s * P
 
+def _d_rot_from_generator(theta, P, scale, dtype):
+    """Derivative of _rot_from_generator wrt theta."""
+    c = jnp.cos(scale * theta)
+    s = jnp.sin(scale * theta)
+    I = jnp.eye(P.shape[0], dtype=dtype)
+    return -scale * s * I - 1j * scale * c * P
+
 # Pauli 1q
 def _paulis_1q(dtype):
     X = jnp.array([[0, 1],

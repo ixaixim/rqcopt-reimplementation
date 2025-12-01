@@ -1,0 +1,5 @@
+wire trotterized xyz heisenberg hamiltonian in the run.py
+
+Optimization
+wire optimization early stop parameters into adam_utils.py and 
+include them into configs and run.py
