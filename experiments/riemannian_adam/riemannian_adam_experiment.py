@@ -14,8 +14,8 @@ from rqcopt_mpo.optimization.utils import overlap_to_loss
 
 # trotterization params
 n_sites = 10 # choose even number
-J = 1.0
-D = -0.5
+J = 0. # HAS TO BE ZERO
+D = 1.
 h = 0.75
 t = 0.25 # time of evolution
 
@@ -44,7 +44,7 @@ target_mpo.left_canonicalize(normalize=target_is_normalized)
 
 # set up quantum circuit
 
-reps = 3
+reps = 4
 dt = t/reps
 order = 2
 # init_circ = trotterized_heisenberg_circuit(
@@ -74,8 +74,8 @@ print(f"Initial Fidelity of Circuit: {overlap_to_loss(np.trace(init_circ.to_matr
 # print(f"Initial Fidelity of Decomposed Circuit: {overlap_to_loss(np.trace(init_circ.to_matrix().conjugate().T @ target_circ.to_matrix()), n_sites=n_sites, normalize=target_is_normalized)}")
 
 # Optimization parameters
-max_steps = 1500 #debug
-lr = 1e-4
+max_steps = 2000 #debug
+lr = 1e-5
 betas = (0.9, 0.999)
 eps = 1e-8
 clip_grad_norm = None
@@ -86,7 +86,7 @@ svd_cutoff = 0.0
 print("Optimizing brickwall circuit (Riemannian Adam)")
 
 patience = 10
-min_delta = 1e-8
+min_delta = 1e-10
 best_loss = [np.inf]
 stalled_steps = [0]
 

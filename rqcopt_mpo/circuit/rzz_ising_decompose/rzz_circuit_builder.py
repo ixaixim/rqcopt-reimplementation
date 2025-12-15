@@ -102,7 +102,7 @@ def rzz_decompose_ising_circuit(orig: Circuit):
                     # TODO: might have to reorder how params are saved
                     params_dict[key] = np.array(op.params)
                 gate.params_dict = params_dict
-                params.append(
+                params.extend([
                     params_dict["K_L_upper"],
                     params_dict["K_L_lower"],
                     params_dict["Rzz1"],
@@ -111,18 +111,16 @@ def rzz_decompose_ising_circuit(orig: Circuit):
                     params_dict["Rzz2"],
                     params_dict["K_R_upper"],
                     params_dict["K_R_lower"],
-
-                )
+                ])
                 gate.params = tuple(params)
                 gate.name = "Ising_field_term"
-            
 
-    if layer.is_odd:
-    # store the trotter angle 
-        for gate in layer.iterate_gates():
-            angle = rzz_angle(gate.matrix)
-            gate.params.append(np.array(angle))
-            gate.name = "Ising_no_field"
+        if layer.is_odd:
+            # store the trotter angle 
+            for gate in layer.iterate_gates():
+                angle = rzz_angle(gate.matrix)
+                gate.params = (np.array(angle),)
+                gate.name = "Ising_no_field"
     return new_circ
 
 
@@ -132,4 +130,3 @@ def rzz_decompose_ising_circuit(orig: Circuit):
     # KAK decomposition. every gate is parametrizable 
     # odd layer: 
     # iterate through gate: extract angle to get the term: 2 * J * t_trotter (use function)
-    return # parametrized circuit.

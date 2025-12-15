@@ -8,7 +8,7 @@ from rqcopt_mpo.mpo.mpo_dataclass import MPO
 from rqcopt_mpo.optimization.weyl_optimizer.adam import Adam
 from rqcopt_mpo.utils.pytree import extract_params_tree
 from rqcopt_mpo.optimization.utils import overlap_to_loss
-from .utils import param_grad_rzz_ising_field, param_grad_rzz_ising_no_field
+from .utils import param_grad_rzz_ising_field, param_grad_rzz_ising_no_field, _update_circuit_from_trees
 
 def optimize(
         circ: Circuit, 
@@ -24,9 +24,6 @@ def optimize(
         bias_correction: bool = True,
         callback: Optional[Callable[..., bool]] = None,
         init_vertical_sweep = "top-down",
-
-        # todo: pass the parametrize function
-        # pass the param grad and the names dictionary
 ):
 
     # set circuit parameters in place with params and return an array of parameters
@@ -40,24 +37,22 @@ def optimize(
     params_array = opt.prepare_layout_from_trees(params_tree, meta_tree) # array of parameters
 
     # # register the param keys for the chain rule to be applied correctly on each group of gates
-    opt.register_param_grad("rzz_ising_with_field", param_grad_rzz_ising_field)
-    opt.register_param_grad("rzz_ising_no_field", param_grad_rzz_ising_no_field) # derivative of rzz 
-
-
+    opt.register_param_grad("Ising_field_term", param_grad_rzz_ising_field)
+    opt.register_param_grad("Ising_no_field", param_grad_rzz_ising_no_field) 
 
     history: List[float] = []
     # # # attach the MPO and compute the euclidean gradient
     for it in range(max_steps):
         # euclidean gradient for each gate.
         overlap, grads_ordered, info = cost_and_euclidean_grad(
-            circ,
+            new_circ,
             mpo_ref,
-            vertical_sweep=init_vertical_sweep, # todo: which direction?
+            vertical_sweep=init_vertical_sweep, 
             max_bondim_env=max_bondim_env,
             svd_cutoff=svd_cutoff,
         )
         
-    #     # idea: you can use backprop and chain it with the current tensor computation.
+        # idea: you can use backprop and chain it with the current tensor computation.
         params_array, _state, _stats = opt.step(
             params_array,
             grads_ordered,
@@ -67,23 +62,23 @@ def optimize(
         )
 
         params_tree_updated = opt.unflatten_to_params_tree(params_array)
-        # _update_circuit_from_trees(new_circ, params_tree_updated, meta_tree)
+        _update_circuit_from_trees(new_circ, params_tree_updated, meta_tree)
 
-    #     loss = overlap_to_loss(
-    #         overlap=overlap,
-    #         kind="HST",
-    #         n_sites=new_circ.n_sites,
-    #         normalize=mpo_ref.is_normalized,
-    #     )
-    #     history.append(loss)
-    #     print(f"Step: {it}, Loss: {loss}")
+        loss = overlap_to_loss(
+            overlap=overlap,
+            kind="HST",
+            n_sites=new_circ.n_sites,
+            normalize=mpo_ref.is_normalized,
+        )
+        history.append(loss)
+        print(f"Step: {it}, Loss: {loss}")
 
-    #     if callback is not None:
-    #         should_stop = callback(
-    #             step=it,
-    #             loss=loss,
-    #         )
-    #         if should_stop:
-    #             return new_circ, history
+        if callback is not None:
+            should_stop = callback(
+                step=it,
+                loss=loss,
+            )
+            if should_stop:
+                return new_circ, history
 
-    return new_circ, history 
+    return new_circ, history

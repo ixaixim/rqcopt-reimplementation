@@ -1,3 +1,16 @@
+# General Purpose 
+To run compression of quantum circuits using tensor network methods. 
+Gradient of loss function with respect to a gate is computed through "punching a hole" in the tensor network (contracting upper, lower, right, left environments).
+If internally the gate has parameters, their gradients are computed by chain rule. 
+Folders:
+experiments/ holds experimnents with different optimizers and circuit decompositions.
+circuit/: Brickwall circuit dataclasses, builders, and decomposition utilities (Trotter, CNOT, RZZ Ising, Weyl).
+hamiltonian/: Local spin-model Hamiltonians and operator definitions (Heisenberg, XYZ, generic operators).
+jax_config.py: JAX configuration helpers (dtype, jit options, global settings).
+mpo/: MPO dataclasses and builders for representing time-evolution and other operators as tensor networks.
+optimization/: Optimizers, gradient utilities, and experiment-specific optimizers (Riemannian Adam, Weyl, CNOT, RZZ Ising).
+tensor_network/: Core tensor-network operations used for contractions and MPO/circuit manipulations.
+utils/: General utilities (batched operations, pytrees, rotation helpers, small shared helpers).
 # Environment Configuration
 When executing Python scripts, ensure the temporary directory is defined and use the project virtual environment. 
 ALWAYS run the command using this exact prefix (only if running from VS Code Extension, NOT from Codex CLI):

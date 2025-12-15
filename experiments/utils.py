@@ -8,6 +8,7 @@ from typing import Any, Optional
 import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 
 from rqcopt_mpo.circuit.trotter.trotter_circuit_builder import trotterized_heisenberg_circuit
 from rqcopt_mpo.mpo.mpo_builder import circuit_to_mpo
@@ -211,18 +212,18 @@ def plot_all_losses(
         Path to the saved figure.
     """
     if out_dir is None:
-        # Folder where this python file lives
         try:
             out_dir = Path(__file__).resolve().parent
         except NameError:
-            # Fallback for interactive sessions
             out_dir = Path.cwd()
 
     out_dir.mkdir(parents=True, exist_ok=True)
     fn = out_dir / f"{out_name}.{fmt}"
 
-    plt.figure(figsize=(8, 5))
+    # --- Create figure and explicit axis ---
+    fig, ax = plt.subplots(figsize=(8, 5))
 
+    # --- Plot all loss curves ---
     for name, content in all_data.items():
         loss = content.get("loss")
         method = content.get("method")
@@ -231,28 +232,36 @@ def plot_all_losses(
             print(f"Skipping {name}: no 'loss' key")
             continue
 
-        # Convert to 1D float array if possible
         loss = np.asarray(loss).reshape(-1)
 
-        # method may be np.ndarray with dtype=object or 0-d array; normalize to str
+        # Normalize method to string
         if isinstance(method, np.ndarray):
             method = method.item() if method.shape == () else str(method)
         if method is None:
             method = name
 
         x = np.arange(1, len(loss) + 1)
-        plt.plot(x, loss, label=str(method))
+        ax.plot(x, loss, label=str(method))
 
-    plt.xlabel("Iteration")
-    plt.ylabel("Loss")
-    plt.yscale("log")
-    plt.title("Loss vs. Iteration")
-    plt.legend()
-    plt.grid(True, linestyle="--", alpha=0.6)
-    plt.tight_layout()
+    # --- Log scale + ticks ---
+    ax.set_yscale("log")
+    ax.minorticks_on()
+    ax.yaxis.set_minor_locator(
+        mticker.LogLocator(base=10.0, subs=tuple(range(2, 10)))
+    )
+    ax.tick_params(axis='y', which='minor', length=4, color='gray')
+    ax.tick_params(axis='y', which='major', length=7)
 
-    plt.savefig(fn, dpi=dpi, format=fmt)
-    plt.close()
+    # --- Labels, title, grid ---
+    ax.set_xlabel("Iteration")
+    ax.set_ylabel("Loss")
+    ax.set_title("Loss vs. Iteration")
+    ax.legend()
+    ax.grid(True, linestyle="--", alpha=0.6)
+
+    fig.tight_layout()
+    fig.savefig(fn, dpi=dpi, format=fmt)
+    plt.close(fig)
 
     print(f"Saved plot to {fn}")
     return fn

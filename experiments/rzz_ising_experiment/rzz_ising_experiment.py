@@ -16,15 +16,15 @@ from rqcopt_mpo.optimization.adam_utils import make_early_stop
 from experiments.utils import save_data_npz
 
 # trotterization params
-n_sites = 6 # choose even number
+n_sites = 10 # choose even number
 J = 0. # HAS TO BE ZERO
-D = 0.5
-h = 1.2
-t = 1. # time of evolution
+D = 1.
+h = 0.75
+t = 0.25 # time of evolution
 if J != 0 or h==0:
     raise ValueError("Only Transverse Field Ising Model (TFIM) is permitted here.")
 
-reps = 4 #debug 
+reps = 10 #debug 
 order = 4
 dt = t/reps
 dtype = jnp.complex128
@@ -44,7 +44,7 @@ target_circ = trotterized_xyz_circuit(
 print(f"Target circuit with {target_circ.num_layers} layers")
 target_mpo = circuit_to_mpo(target_circ)
 
-reps = 3
+reps = 4
 dt = t/reps
 order = 2
 
@@ -70,8 +70,8 @@ new_circ = rzz_decompose_ising_circuit(initial_circuit) # matrices are grouped
 # new_circ.print_gates()
 
 # Optimization parameters (mirroring other experiments setup)
-max_steps = 1000
-lr = 1e-4
+max_steps = 2000
+lr = 1e-5
 betas = (0.9, 0.999)
 eps = 1e-8
 clip_grad_norm = None
@@ -79,7 +79,7 @@ max_bondim_env = 128
 svd_cutoff = 0.0
 
 patience = 10
-min_delta = 1e-8
+min_delta = 1e-10
 early_stop = make_early_stop(patience=patience, min_delta=min_delta)
 circ, loss = optimize(
     new_circ,
@@ -94,6 +94,6 @@ circ, loss = optimize(
     callback=early_stop
 )
 
-# lr_tag = f"{lr:.0e}".replace(".", "p")
-# base_dir = Path(__file__).resolve().parent
-# save_data_npz(base_dir, f"loss_cnot_reps_{reps}_lr_{lr_tag}", loss, method="cnot_block")
+lr_tag = f"{lr:.0e}".replace(".", "p")
+base_dir = Path(__file__).resolve().parent
+save_data_npz(base_dir, f"loss_rzz_ising_reps_{reps}_lr_{lr_tag}", loss, method="rzz_ising")
