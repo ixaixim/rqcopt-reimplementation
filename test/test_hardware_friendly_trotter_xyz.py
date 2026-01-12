@@ -56,8 +56,8 @@ def test_collapse_option():
     print("Testing 'collapse' option...")
     n = 4
     dt = 0.1
-    reps = 1
-    order = 2
+    reps = 2
+    order = 4
     
     # 1. Standard (Expanded)
     circ_expanded = trotterized_hardware_friendly_xyz_circuit(
@@ -90,6 +90,9 @@ def test_collapse_option():
     if diff > 1e-12:
         raise ValueError("Collapsed circuit unitary differs significantly from expanded one!")
     print("  Collapse test passed.")
+
+
+
 
 # --------------------------- sweep over Δt ------------------------------- #
 test_collapse_option() # Run the test

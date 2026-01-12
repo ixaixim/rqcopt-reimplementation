@@ -286,6 +286,10 @@ def trotterized_hardware_friendly_xyz_layers(
             else:
                 # Final E(dt/2)
                 add_interaction("even", dt_half)
+
+        if collapse:
+            layers = absorb_boundary_1q_gates(layers)
+            
         return layers
 
     # --- 4th Order ---
@@ -335,10 +339,55 @@ def trotterized_hardware_friendly_xyz_layers(
             else:
                 # Final trailing E
                 add_interaction("even", t_half)
-                
+
+        if collapse:
+            layers = absorb_boundary_1q_gates(layers)
+            
         return layers
 
+def absorb_boundary_1q_gates(layers: List[GateLayer]):
+    # NOTE: this only works for order 2 and 4!
+    if not layers:
+        return layers
 
+    n_sites = layers[0].n_sites
+    # Boundary qubits are the first and last qubits
+    boundary_qubits = [0, n_sites - 1]
+
+    # Iterate through layers based on the pattern where redundancy occurs
+    for idx in range(3, len(layers), 4):
+        target_idx = idx - 2
+        
+        source_layer = layers[idx]
+        target_layer = layers[target_idx]
+        
+        for q in boundary_qubits:
+            # Find the gate acting on qubit q in the source layer (idx)
+            source_gate = None
+            for g in source_layer.gates:
+                if g.qubits == (q,):
+                    source_gate = g
+                    break
+            
+            # Find the gate acting on qubit q in the target layer (idx-2)
+            target_gate = None
+            for g in target_layer.gates:
+                if g.qubits == (q,):
+                    target_gate = g
+                    break
+            
+            if source_gate is not None and target_gate is not None:
+                # Absorb source into target.
+                # Since layer idx is applied AFTER layer idx-2,
+                # New Matrix = Source Matrix @ Target Matrix
+                new_matrix = source_gate.matrix @ target_gate.matrix
+                target_gate.matrix = new_matrix
+                
+                # Remove the source gate from the source layer
+                source_layer.gates.remove(source_gate)
+                
+    return layers
+    
 def trotterized_hardware_friendly_xyz_circuit(
     n_sites: int,
     Jx: float,
@@ -351,7 +400,7 @@ def trotterized_hardware_friendly_xyz_circuit(
     order: int = 1,
     dt: float,
     reps: int,
-    collapse: bool = False,
+    collapse: bool = True,
     dtype: jnp.dtype | None = None,
 ) -> Circuit:
     """
@@ -362,7 +411,7 @@ def trotterized_hardware_friendly_xyz_circuit(
         hx=hx, hy=hy, hz=hz,
         order=order, dt=dt, reps=reps, collapse=collapse, dtype=dtype
     )
-    
+
     return Circuit(
         n_sites=n_sites,
         layers=layers,
