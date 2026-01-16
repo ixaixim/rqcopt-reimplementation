@@ -25,7 +25,7 @@ t = 0.25 # time of evolution
 if J != 0 or hx==0 or hz==0:
     raise ValueError("Only Transverse Field Ising Model (TFIM) is permitted here.")
 
-reps = 10 
+reps = 1
 order = 4 
 dt = t/reps
 dtype = jnp.complex128
@@ -53,15 +53,16 @@ target_circ = trotterized_hardware_friendly_xyz_circuit(
 print(f"Target circuit with {target_circ.num_layers} layers")
 target_mpo = circuit_to_mpo(target_circ)
 
-reps = 2
+reps = 3
 dt = t/reps
-order = 2
+order = 4
 
 initial_circuit = trotterized_hardware_friendly_xyz_circuit(    
     n_sites=n_sites, Jx=J, Jy=J, Jz=D, hx=hx, hz=hz, 
     order=order, dt=dt, reps=reps, collapse=True,
     dtype=dtype
 )
+print(f"Number of 2-qubit gate layers: {initial_circuit.num_2q_layers}")
 # initial_circuit.print_gates()
 # print(f"Initial circuit with {initial_circuit.num_layers} layers")
 
@@ -80,7 +81,10 @@ circ, loss = optimize(
     betas=betas,
     eps=eps,
     clip_grad_norm=clip_grad_norm,
+    use_ad=False,
     # callback=early_stop, 
 )
+
+# add to csv the data, along with the 
 
 

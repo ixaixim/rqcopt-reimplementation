@@ -186,6 +186,14 @@ class Circuit:
         return len(self.layers)
     
     @property
+    def num_2q_layers(self):
+        n = 0
+        for layer in self.layers:
+            if any(gate.is_two_qubit() for gate in layer.gates):
+                n += 1
+        return n    
+    
+    @property
     def num_gates(self):
         n = 0
         for layer in self.layers:

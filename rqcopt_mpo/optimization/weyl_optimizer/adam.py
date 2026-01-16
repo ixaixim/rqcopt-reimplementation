@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple, Dict, List, Callable
 
 import jax.numpy as jnp
+import jax
 from jax import tree_util as jtu
 
 
@@ -108,6 +109,35 @@ class Adam:
     def register_param_grad(self, gate_name: str, fn: Callable[..., jnp.ndarray]):
         self.param_grad_fns[gate_name] = fn
 
+    @staticmethod
+    def make_ad_param_grad(gate_fn: Callable[[jnp.ndarray], jnp.ndarray]):
+        """
+        Creates a param_grad function that uses JAX AD to differentiate the gate_fn.
+        gate_fn: theta -> U (unitary matrix)
+        """
+        def ad_grad_fn(theta, dL_dG, overlap, meta, n_sites, is_normalized):
+            # Define local loss function: L = 1 - |Tr(E^dag U)|^2 / Norm
+            # dL_dG is the environment E.
+            def loss(t):
+                U = gate_fn(t)
+                # Ensure U has the same shape as dL_dG for element-wise multiplication
+                U = U.reshape(dL_dG.shape)
+                # Overlap O = Tr(E^dag U) = sum(E.conj * U)
+                # NOTE: dL_dG is the environment tensor Env = d(Overlap)/dU. 
+                # So Overlap = sum(Env * U). 
+                ov = jnp.sum(dL_dG * U)
+                mag_sq = jnp.abs(ov)**2
+                
+                if is_normalized:
+                    denom = 2.0**n_sites
+                else:
+                    denom = 2.0**(2*n_sites)
+                
+                return 1.0 - mag_sq / denom
+            
+            # Compute gradient w.r.t theta
+            return jax.grad(loss)(theta)
+        return ad_grad_fn
           
     # ---------------------------------------------------------------------
     # Main update step operating on the flat parameter vector U
