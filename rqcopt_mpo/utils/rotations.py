@@ -15,7 +15,7 @@ import jax.numpy as jnp
 # 
 
 def _backprop_hst_loss(z, dz_dG, dG_dtheta, n_sites, is_normalized):
-    d = 2**n_sites
+    d = 2.0**n_sites
     denom = d*d if not is_normalized else d
     # implements  sum_{ij} (∂f/∂G_ij) * (dG_ij/dθ)
     return -(2.0 / denom) * jnp.real(jnp.conjugate(z) * jnp.trace(dz_dG.T @ dG_dtheta)

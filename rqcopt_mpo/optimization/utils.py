@@ -40,16 +40,16 @@ def overlap_to_loss(
         # maximal overlap for d-dim local Hilbert spaces is d**n_sites
         if (normalize is False):
             # MPO
-            denom = 2 ** (2 * n_sites)
+            denom = 2.0 ** (2 * n_sites)
         else: 
-            denom = 2 ** n_sites
+            denom = 2.0 ** n_sites
         return 1.0 - (jnp.abs(overlap) ** 2) / denom
     
     elif kind.lower() == "frobenius":
-        # assuming overlap = -Re tr(U_ref^† U_circ), up to constants
-        # map it to squared-norm loss: 2*d**n_sites - 2*Re overlap
-        # denom = (2**n_sites) if normalize and n_sites is not None else 1.0
-        # return (2.0 * denom) - 2.0 * jnp.real(overlap)
-        raise NotImplementedError("Needs implementation")
+        if normalize:
+            denom = 2.0 ** (n_sites / 2.0)
+        else:
+            denom = 2.0 ** n_sites
+        return 2.0 - 2.0 * jnp.real(overlap) / denom
     else:
         raise ValueError(f"Unknown loss kind: {kind}")

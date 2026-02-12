@@ -254,6 +254,24 @@ def suzuki_trotter(local_terms, k, delta_t, n):
         return U
 
 
+def fourth_order_yoshida(local_terms, delta_t, n):
+    """
+    Compute the 4th-order Yoshida optimized Trotter evolution.
+    Uses the 3-stage composition: S2(x1) S2(x0) S2(x1).
+    This is more efficient (6 layers/step) than the recursive formula (10 layers/step).
+    """
+    # Yoshida coefficients
+    cbrt2 = 2.0 ** (1.0 / 3.0)
+    x1 = 1.0 / (2.0 - cbrt2)
+    x0 = 1.0 - 2.0 * x1
+    
+    S_x1 = second_order_trotter(local_terms, x1 * delta_t, 1)
+    S_x0 = second_order_trotter(local_terms, x0 * delta_t, 1)
+    
+    U_step = S_x1 @ S_x0 @ S_x1
+    U = np.linalg.matrix_power(U_step, n)
+    return U
+
 def H_from_local(local_terms):
     """
     Construct the full Hamiltonian by summing the list of local Hamiltonians.
@@ -306,11 +324,13 @@ def plot_trotter_error(local_terms, t=1.0):
         U_trotter_first = first_order_trotter(local_terms, delta_t, n)
         U_trotter_second = second_order_trotter(local_terms, delta_t, n)
         U_trotter_fourth = suzuki_trotter(local_terms, 2, delta_t, n)
+        U_trotter_yoshida = fourth_order_yoshida(local_terms, delta_t, n)
         
         # Compute the error as the spectral norm of the difference.
         error_first = np.linalg.norm(U_exact - U_trotter_first, ord=2)
         error_second = np.linalg.norm(U_exact - U_trotter_second, ord=2)
         error_fourth = np.linalg.norm(U_exact - U_trotter_fourth, ord=2)
+        error_yoshida = np.linalg.norm(U_exact - U_trotter_yoshida, ord=2)
         
         errors_first.append(error_first)
         errors_second.append(error_second)
@@ -321,6 +341,7 @@ def plot_trotter_error(local_terms, t=1.0):
     plt.loglog(delta_t_list, errors_first, 'o-', label='First-Order Trotter Error')
     plt.loglog(delta_t_list, errors_second, 's-', label='Second-Order Trotter Error')
     plt.loglog(delta_t_list, errors_fourth, '^-', label='Fourth-Order Trotter Error')
+    plt.loglog(delta_t_list, errors_fourth, 'x--', label='Fourth-Order Yoshida (Optimized)')
     
     # Plot reference lines.
     # For first-order splitting, overall error ∼ O(Δt)
@@ -348,4 +369,3 @@ def plot_trotter_error(local_terms, t=1.0):
     plt.ylim([y_min, y_max])
     
     plt.savefig('plots/trotter_error.png')
-

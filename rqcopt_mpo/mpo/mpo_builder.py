@@ -2,7 +2,8 @@ import rqcopt_mpo.jax_config
 import jax.numpy as jnp
 import jax
 import numpy as np
-from typing import List
+from typing import List, Optional
+import rqcopt_mpo.jax_pytree_registration # Register pytrees
 
 from .mpo_dataclass import MPO
 from rqcopt_mpo.circuit.circuit_dataclasses import Circuit
@@ -107,21 +108,38 @@ def create_dummy_mpo(bond_dims_right, phys_dim=2, *, dtype=jnp.complex64,
 # create an id mpo and place it at the beginning (bottom) of the circuit 
 # absorb layers from above
 
-def circuit_to_mpo(circuit: Circuit, svd_cutoff: float = 1e-12):
-    # create from circuit
-    # create an id mpo and place it at the beginning (bottom) of the circuit 
-    # absorb layers from above
-    # NOTE: contracting from above, starting from last layer, is equivalent.
-    dtype = circuit.layers[0].gates[0].matrix.dtype
-    n_sites = circuit.n_sites
-    mpo = get_id_mpo(n_sites, dtype=dtype)
-    
-
+def _contract_circuit_layers(mpo: MPO, circuit: Circuit, max_bondim: Optional[int], svd_cutoff: float) -> MPO:
     direction = 'right_to_left'
     for l in circuit.layers:
         mpo = contract_mpo_with_layer(mpo_init=mpo, layer=l, 
                                       layer_is_below=False, direction=direction, 
+                                      max_bondim=max_bondim,
                                       svd_cutoff=svd_cutoff,
                                       )
         direction = 'right_to_left' if direction == 'left_to_right' else 'left_to_right'
+    return mpo
+
+def circuit_to_mpo(circuit: Circuit, max_bondim: Optional[int] = None, svd_cutoff: float = 1e-12):
+    # create from circuit
+    # create an id mpo and place it at the beginning (bottom) of the circuit 
+    # absorb layers from above
+    # NOTE: contracting from above, starting from last layer, is equivalent.
+    
+    # Handle empty circuit or dtype access safely
+    if not circuit.layers:
+         # Fallback to circuit.dtype if layers empty (though gates[0] might fail)
+         dtype = circuit.dtype 
+    elif circuit.layers[0].gates:
+         dtype = circuit.layers[0].gates[0].matrix.dtype
+    else:
+         dtype = circuit.dtype
+
+    n_sites = circuit.n_sites
+    mpo = get_id_mpo(n_sites, dtype=dtype)
+    
+    # Use the helper function (non-JIT)
+    # Note: JIT removed because SVD truncation changes array shapes dynamically,
+    # which is incompatible with JAX JIT's static shape requirement.
+    mpo = _contract_circuit_layers(mpo, circuit, max_bondim, svd_cutoff)
+    
     return mpo

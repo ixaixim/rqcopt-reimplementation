@@ -155,8 +155,10 @@ class MPO:
         """
         if self.is_left_canonical:
             print("MPO is already left-canonical.")
-            if not self.is_normalized:
-                # TODO: should call just the normalize method and have the special case there.
+            if self.is_normalized:
+                print("MPO is already normalized.")
+                return None if normalize else self.norm
+            else:
                 if normalize:
                     print("However, MPO is not normalized. Proceeding to normalize.")
                     mpo = self.tensors[-1]
@@ -170,10 +172,9 @@ class MPO:
                     self.tensors[-1] = Q.reshape(shape[:-1] + (Q.shape[-1],))
                     self.norm = 1.0
                     self.is_normalized = True
-                    return None            
-            
-            print("MPO is already normalized.")
-            return None if normalize else self.norm
+                    return None
+                else:
+                    return self.norm
             
              
         current_tensors = self.tensors 

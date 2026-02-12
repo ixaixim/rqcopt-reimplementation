@@ -17,6 +17,7 @@ def trotterized_heisenberg_layers(
     h: float = 0.0,
     *,                       # everything after this is keyword-only
     order: int = 1,
+    method: str = "yoshida",
     dt: float,
     reps: int,
     dtype: jnp.dtype | None = None,
@@ -31,7 +32,10 @@ def trotterized_heisenberg_layers(
     J / D / h
         Couplings in *H = J (X₁X₂ + Y₁Y₂) + D Z₁Z₂ + h (Z₁ + Z₂)*.
     order
-        Trotter–Suzuki order (currently only ``1`` is implemented).
+        Trotter–Suzuki order (1, 2 or 4).
+    method
+        Method for order=4: "yoshida" (minimal 6·reps + 1 layers)
+        or "suzuki" (fractal, 10·reps + 1 layers).
     dt
         Elementary time step **per bond layer**.
     reps
@@ -48,6 +52,8 @@ def trotterized_heisenberg_layers(
     # --- Validation ---------------------------------------------------------
     if order not in (1, 2, 4):
         raise ValueError(f"order must be 1, 2 or 4 (got {order})")
+    if method not in ("yoshida", "suzuki"):
+        raise ValueError(f"method must be 'yoshida' or 'suzuki' (got {method})")
     if n_sites % 2:
         raise ValueError(f"n_sites must be even (got {n_sites})")
 
@@ -94,42 +100,86 @@ def trotterized_heisenberg_layers(
     # ======================================================================
     # 4th-order  (Yoshida, minimal 6·reps + 1 layers)
     # ======================================================================
-    # Yoshida constant  s = 1 / (2 − 2^{1/3})
-    cbrt2 = 2.0 ** (1.0 / 3.0)
-    s = 1.0 / (2.0 - cbrt2)
+    if method == "yoshida":
+        # Yoshida constant  s = 1 / (2 − 2^{1/3})
+        cbrt2 = 2.0 ** (1.0 / 3.0)
+        s = 1.0 / (2.0 - cbrt2)
 
-    # time-step coefficients
-    a = s * dt                  #  a  = s·dt        (positive)
-    b = (1.0 - 2.0 * s) * dt    #  b  = (1−2s)·dt   (negative)
-    e_half = a / 2.0            # leading / trailing  E(s·dt/2)
-    e_mid  = (1.0 - s) * dt / 2 # central even layers E((1−s)·dt/2)
-    e_full = a                  # inter-rep merged   E(s·dt)
+        # time-step coefficients
+        a = s * dt                  #  a  = s·dt        (positive)
+        b = (1.0 - 2.0 * s) * dt    #  b  = (1−2s)·dt   (negative)
+        e_half = a / 2.0            # leading / trailing  E(s·dt/2)
+        e_mid  = (1.0 - s) * dt / 2 # central even layers E((1−s)·dt/2)
+        e_full = a                  # inter-rep merged   E(s·dt)
 
 
-    # ---- leading  E(s·dt/2) ---------------------------------------------
-    layers.append(_add_layer("even", e_half, layer_idx)); layer_idx += 1
+        # ---- leading  E(s·dt/2) ---------------------------------------------
+        layers.append(_add_layer("even", e_half, layer_idx)); layer_idx += 1
 
-    # ---- repeat block  ---------------------------------------------------
-    for rep in range(1, reps + 1):
-        #  O(a)
-        layers.append(_add_layer("odd",  a,      layer_idx)); layer_idx += 1
-        #  E((1−s)·dt/2)
-        layers.append(_add_layer("even", e_mid,  layer_idx)); layer_idx += 1
-        #  O(b)
-        layers.append(_add_layer("odd",  b,      layer_idx)); layer_idx += 1
-        #  E((1−s)·dt/2)
-        layers.append(_add_layer("even", e_mid,  layer_idx)); layer_idx += 1
-        #  O(a)
-        layers.append(_add_layer("odd",  a,      layer_idx)); layer_idx += 1
+        # ---- repeat block  ---------------------------------------------------
+        for rep in range(1, reps + 1):
+            #  O(a)
+            layers.append(_add_layer("odd",  a,      layer_idx)); layer_idx += 1
+            #  E((1−s)·dt/2)
+            layers.append(_add_layer("even", e_mid,  layer_idx)); layer_idx += 1
+            #  O(b)
+            layers.append(_add_layer("odd",  b,      layer_idx)); layer_idx += 1
+            #  E((1−s)·dt/2)
+            layers.append(_add_layer("even", e_mid,  layer_idx)); layer_idx += 1
+            #  O(a)
+            layers.append(_add_layer("odd",  a,      layer_idx)); layer_idx += 1
 
-        #  Inter-rep merger  E(s·dt)  (skip after final repetition)
-        if rep < reps:
-            layers.append(_add_layer("even", e_full, layer_idx)); layer_idx += 1
+            #  Inter-rep merger  E(s·dt)  (skip after final repetition)
+            if rep < reps:
+                layers.append(_add_layer("even", e_full, layer_idx)); layer_idx += 1
 
-    # ---- trailing  E(s·dt/2) --------------------------------------------
-    layers.append(_add_layer("even", e_half, layer_idx)); layer_idx += 1
+        # ---- trailing  E(s·dt/2) --------------------------------------------
+        layers.append(_add_layer("even", e_half, layer_idx)); layer_idx += 1
 
-    return layers
+        return layers
+
+    # ======================================================================
+    # 4th-order  (Suzuki, 10·reps + 1 layers)
+    # ======================================================================
+    if method == "suzuki":
+        # Suzuki constant p = 1 / (4 - 4^{1/3})
+        cbrt4 = 4.0 ** (1.0 / 3.0)
+        p = 1.0 / (4.0 - cbrt4)
+
+        # time-step coefficients
+        k1 = p * dt                 # positive
+        k2 = (1.0 - 4.0 * p) * dt   # negative
+        
+        e_half = k1 / 2.0           # leading / trailing  E(p·dt/2)
+        e_full = k1                 # inter-rep merged    E(p·dt)
+        e_k1   = k1                 # E layer between O(k1) and O(k1)
+        e_mid  = (1.0 - 3.0 * p) * dt / 2.0  # (k1 + k2)/2
+
+        # ---- leading  E(k1/2) ---------------------------------------------
+        layers.append(_add_layer("even", e_half, layer_idx)); layer_idx += 1
+
+        # ---- repeat block  ---------------------------------------------------
+        for rep in range(1, reps + 1):
+            # S2(k1) S2(k1) S2(k2) S2(k1) S2(k1)
+            # expands to: O(k1), E(k1), O(k1), E(e_mid), O(k2), E(e_mid), O(k1), E(k1), O(k1)
+            layers.append(_add_layer("odd",  k1,     layer_idx)); layer_idx += 1
+            layers.append(_add_layer("even", e_k1,   layer_idx)); layer_idx += 1
+            layers.append(_add_layer("odd",  k1,     layer_idx)); layer_idx += 1
+            layers.append(_add_layer("even", e_mid,  layer_idx)); layer_idx += 1
+            layers.append(_add_layer("odd",  k2,     layer_idx)); layer_idx += 1
+            layers.append(_add_layer("even", e_mid,  layer_idx)); layer_idx += 1
+            layers.append(_add_layer("odd",  k1,     layer_idx)); layer_idx += 1
+            layers.append(_add_layer("even", e_k1,   layer_idx)); layer_idx += 1
+            layers.append(_add_layer("odd",  k1,     layer_idx)); layer_idx += 1
+
+            # Inter-rep merger E(p*dt)
+            if rep < reps:
+                layers.append(_add_layer("even", e_full, layer_idx)); layer_idx += 1
+
+        # ---- trailing  E(k1/2) --------------------------------------------
+        layers.append(_add_layer("even", e_half, layer_idx)); layer_idx += 1
+
+        return layers
 
 def trotterized_heisenberg_circuit(
     n_sites: int,
@@ -138,14 +188,15 @@ def trotterized_heisenberg_circuit(
     h: float = 0.0,
     *,                       # everything after this is keyword-only
     order: int = 1,
+    method: str = "yoshida",
     dt: float,
     reps: int,
     dtype: jnp.dtype | None = None,
 ):
     layers = trotterized_heisenberg_layers(
-    n_sites=n_sites, J=J, D=D, h=h,
-    order=order, dt=dt, reps=reps,
-    dtype=dtype
+        n_sites=n_sites, J=J, D=D, h=h,
+        order=order, method=method, dt=dt, reps=reps,
+        dtype=dtype
     )
     circ = Circuit(
         n_sites=n_sites,
@@ -164,6 +215,7 @@ def trotterized_xyz_layers(
     hy: float = 0.0,
     hz: float = 0.0,
     order: int = 1,
+    method: str = "yoshida",
     dt: float,
     reps: int,
     dtype: jnp.dtype | None = None,
@@ -181,6 +233,9 @@ def trotterized_xyz_layers(
         Fields in *H = ... + hx X + hy Y + hz Z*.
     order
         Trotter–Suzuki order (1, 2 or 4).
+    method
+        Method for order=4: "yoshida" (minimal 6·reps + 1 layers)
+        or "suzuki" (fractal, 10·reps + 1 layers).
     dt
         Elementary time step **per bond layer**.
     reps
@@ -196,6 +251,8 @@ def trotterized_xyz_layers(
     # --- Validation ---------------------------------------------------------
     if order not in (1, 2, 4):
         raise ValueError(f"order must be 1, 2 or 4 (got {order})")
+    if method not in ("yoshida", "suzuki"):
+        raise ValueError(f"method must be 'yoshida' or 'suzuki' (got {method})")
     if n_sites % 2:
         raise ValueError(f"n_sites must be even (got {n_sites})")
 
@@ -241,42 +298,87 @@ def trotterized_xyz_layers(
     # ======================================================================
     # 4th-order  (Yoshida, minimal 6·reps + 1 layers)
     # ======================================================================
-    # Yoshida constant  s = 1 / (2 − 2^{1/3})
-    cbrt2 = 2.0 ** (1.0 / 3.0)
-    s = 1.0 / (2.0 - cbrt2)
+    if method == "yoshida":
+        # Yoshida constant  s = 1 / (2 − 2^{1/3})
+        cbrt2 = 2.0 ** (1.0 / 3.0)
+        s = 1.0 / (2.0 - cbrt2)
 
-    # time-step coefficients
-    a = s * dt                  #  a  = s·dt        (positive)
-    b = (1.0 - 2.0 * s) * dt    #  b  = (1−2s)·dt   (negative)
-    e_half = a / 2.0            # leading / trailing  E(s·dt/2)
-    e_mid  = (1.0 - s) * dt / 2 # central even layers E((1−s)·dt/2)
-    e_full = a                  # inter-rep merged   E(s·dt)
+        # time-step coefficients
+        a = s * dt                  #  a  = s·dt        (positive)
+        b = (1.0 - 2.0 * s) * dt    #  b  = (1−2s)·dt   (negative)
+        e_half = a / 2.0            # leading / trailing  E(s·dt/2)
+        e_mid  = (1.0 - s) * dt / 2 # central even layers E((1−s)·dt/2)
+        e_full = a                  # inter-rep merged   E(s·dt)
 
 
-    # ---- leading  E(s·dt/2) ---------------------------------------------
-    layers.append(_add_layer("even", e_half, layer_idx)); layer_idx += 1
+        # ---- leading  E(s·dt/2) ---------------------------------------------
+        layers.append(_add_layer("even", e_half, layer_idx)); layer_idx += 1
 
-    # ---- repeat block  ---------------------------------------------------
-    for rep in range(1, reps + 1):
-        #  O(a)
-        layers.append(_add_layer("odd",  a,      layer_idx)); layer_idx += 1
-        #  E((1−s)·dt/2)
-        layers.append(_add_layer("even", e_mid,  layer_idx)); layer_idx += 1
-        #  O(b)
-        layers.append(_add_layer("odd",  b,      layer_idx)); layer_idx += 1
-        #  E((1−s)·dt/2)
-        layers.append(_add_layer("even", e_mid,  layer_idx)); layer_idx += 1
-        #  O(a)
-        layers.append(_add_layer("odd",  a,      layer_idx)); layer_idx += 1
+        # ---- repeat block  ---------------------------------------------------
+        for rep in range(1, reps + 1):
+            #  O(a)
+            layers.append(_add_layer("odd",  a,      layer_idx)); layer_idx += 1
+            #  E((1−s)·dt/2)
+            layers.append(_add_layer("even", e_mid,  layer_idx)); layer_idx += 1
+            #  O(b)
+            layers.append(_add_layer("odd",  b,      layer_idx)); layer_idx += 1
+            #  E((1−s)·dt/2)
+            layers.append(_add_layer("even", e_mid,  layer_idx)); layer_idx += 1
+            #  O(a)
+            layers.append(_add_layer("odd",  a,      layer_idx)); layer_idx += 1
 
-        #  Inter-rep merger  E(s·dt)  (skip after final repetition)
-        if rep < reps:
-            layers.append(_add_layer("even", e_full, layer_idx)); layer_idx += 1
+            #  Inter-rep merger  E(s·dt)  (skip after final repetition)
+            if rep < reps:
+                layers.append(_add_layer("even", e_full, layer_idx)); layer_idx += 1
 
-    # ---- trailing  E(s·dt/2) --------------------------------------------
-    layers.append(_add_layer("even", e_half, layer_idx)); layer_idx += 1
+        # ---- trailing  E(s·dt/2) --------------------------------------------
+        layers.append(_add_layer("even", e_half, layer_idx)); layer_idx += 1
 
-    return layers
+        return layers
+
+    # ======================================================================
+    # 4th-order  (Suzuki, 10·reps + 1 layers)
+    # ======================================================================
+    if method == "suzuki":
+        # Suzuki constant p = 1 / (4 - 4^{1/3})
+        cbrt4 = 4.0 ** (1.0 / 3.0)
+        p = 1.0 / (4.0 - cbrt4)
+
+        # time-step coefficients
+        k1 = p * dt                 # positive
+        k2 = (1.0 - 4.0 * p) * dt   # negative
+        
+        e_half = k1 / 2.0           # leading / trailing  E(p·dt/2)
+        e_full = k1                 # inter-rep merged    E(p·dt)
+        e_k1   = k1                 # E layer between O(k1) and O(k1)
+        e_mid  = (1.0 - 3.0 * p) * dt / 2.0  # (k1 + k2)/2
+
+        # ---- leading  E(k1/2) ---------------------------------------------
+        layers.append(_add_layer("even", e_half, layer_idx)); layer_idx += 1
+
+        # ---- repeat block  ---------------------------------------------------
+        for rep in range(1, reps + 1):
+            # S2(k1) S2(k1) S2(k2) S2(k1) S2(k1)
+            # expands to: O(k1), E(k1), O(k1), E(e_mid), O(k2), E(e_mid), O(k1), E(k1), O(k1)
+            layers.append(_add_layer("odd",  k1,     layer_idx)); layer_idx += 1
+            layers.append(_add_layer("even", e_k1,   layer_idx)); layer_idx += 1
+            layers.append(_add_layer("odd",  k1,     layer_idx)); layer_idx += 1
+            layers.append(_add_layer("even", e_mid,  layer_idx)); layer_idx += 1
+            layers.append(_add_layer("odd",  k2,     layer_idx)); layer_idx += 1
+            layers.append(_add_layer("even", e_mid,  layer_idx)); layer_idx += 1
+            layers.append(_add_layer("odd",  k1,     layer_idx)); layer_idx += 1
+            layers.append(_add_layer("even", e_k1,   layer_idx)); layer_idx += 1
+            layers.append(_add_layer("odd",  k1,     layer_idx)); layer_idx += 1
+
+            # Inter-rep merger E(p*dt)
+            if rep < reps:
+                layers.append(_add_layer("even", e_full, layer_idx)); layer_idx += 1
+
+        # ---- trailing  E(k1/2) --------------------------------------------
+        layers.append(_add_layer("even", e_half, layer_idx)); layer_idx += 1
+
+        return layers
+
 
 def trotterized_xyz_circuit(
     n_sites: int,
@@ -288,6 +390,7 @@ def trotterized_xyz_circuit(
     hy: float = 0.0,
     hz: float = 0.0,
     order: int = 1,
+    method: str = "yoshida",
     dt: float,
     reps: int,
     dtype: jnp.dtype | None = None,
@@ -295,7 +398,7 @@ def trotterized_xyz_circuit(
     layers = trotterized_xyz_layers(
         n_sites=n_sites, Jx=Jx, Jy=Jy, Jz=Jz,
         hx=hx, hy=hy, hz=hz,
-        order=order, dt=dt, reps=reps,
+        order=order, method=method, dt=dt, reps=reps,
         dtype=dtype
     )
     circ = Circuit(
