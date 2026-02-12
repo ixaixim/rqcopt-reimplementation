@@ -33,11 +33,11 @@ H_full       = model.build_hamiltonian_matrix()
 U_exact = expm(-1j * total_time_t * H_full)
 
 # ---------------------- helpers for Trotter circuits --------------------- #
-def trotter_unitary(order: int, delta_t: float, n_steps: int) -> jnp.ndarray:
+def trotter_unitary(order: int, method: str, delta_t: float, n_steps: int) -> jnp.ndarray:
     layers = trotterized_xyz_layers(
         n_sites=n_sites, Jx=Jx, Jy=Jy, Jz=Jz,
         hx=hx, hy=hy, hz=hz,
-        order=order, dt=delta_t, reps=n_steps,
+        order=order, method=method, dt=delta_t, reps=n_steps,
         dtype=jnp.complex128
     )
     circ = Circuit(
@@ -53,40 +53,42 @@ def spectral_error(U_target: jnp.ndarray, U_approx: jnp.ndarray) -> float:
 print("Starting XYZ Trotter test...")
 
 if plot_order == 'all':
-    orders_to_run = [1, 2, 4]
+    orders_to_run = [(1, 'yoshida'), (2, 'yoshida'), (4, 'yoshida'), (4, 'suzuki')]
 elif plot_order in [1, 2, 4]:
-    orders_to_run = [plot_order]
+    orders_to_run = [(plot_order, 'yoshida')]
 else:
     raise ValueError(f"Invalid plot_order: '{plot_order}'. Must be 1, 2, 4, or 'all'.")
 
 n_steps_grid = np.array(np.round(np.logspace(1, 2, 10)), dtype=int)
 delta_t_grid = total_time_t / n_steps_grid
 
-errors = {order: [] for order in orders_to_run}
+errors = {om: [] for om in orders_to_run}
 
 for i, n_steps in enumerate(n_steps_grid):
     dt = delta_t_grid[i]
     # print(f"Testing n_steps={n_steps} (Δt={dt:.4f})")
-    for order in orders_to_run:
-        U_trotter = trotter_unitary(order=order, delta_t=dt, n_steps=n_steps)
+    for order, method in orders_to_run:
+        U_trotter = trotter_unitary(order=order, method=method, delta_t=dt, n_steps=n_steps)
         error = spectral_error(U_exact, U_trotter)
-        errors[order].append(error)
+        errors[(order, method)].append(error)
 
 # ------------------------------- plotting -------------------------------- #
 plt.figure(figsize=(8, 6))
 plot_styles = {
-    1: {'marker': 'o', 'linestyle': '-', 'label': '1st-order'},
-    2: {'marker': 's', 'linestyle': '-', 'label': '2nd-order'},
-    4: {'marker': '^', 'linestyle': '-', 'label': '4th-order'},
+    (1, 'yoshida'): {'marker': 'o', 'linestyle': '-', 'label': '1st-order'},
+    (2, 'yoshida'): {'marker': 's', 'linestyle': '-', 'label': '2nd-order'},
+    (4, 'yoshida'): {'marker': '^', 'linestyle': '-', 'label': '4th-order (Yoshida)'},
+    (4, 'suzuki'):  {'marker': 'v', 'linestyle': '-', 'label': '4th-order (Suzuki)'},
 }
 
-for order, err_list in errors.items():
-    style = plot_styles[order]
+for (order, method), err_list in errors.items():
+    style = plot_styles[(order, method)]
     plt.loglog(delta_t_grid, err_list, **style)
-    prefactor = err_list[-1] / (delta_t_grid[-1]**order)
-    ref_y = prefactor * (delta_t_grid**order)
-    ref_label = rf'O($\Delta t^{order}$) ref.'
-    plt.loglog(delta_t_grid, ref_y, '--', label=ref_label)
+    if method == 'yoshida':
+        prefactor = err_list[-1] / (delta_t_grid[-1]**order)
+        ref_y = prefactor * (delta_t_grid**order)
+        ref_label = rf'O($\Delta t^{order}$) ref.'
+        plt.loglog(delta_t_grid, ref_y, '--', label=ref_label)
 
 plt.xlabel(r'$\Delta t$')
 plt.ylabel(r'$ \| U_{\mathrm{exact}} - U_{\mathrm{Trotter}} \|_2 $')

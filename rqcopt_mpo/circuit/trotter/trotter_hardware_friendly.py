@@ -185,6 +185,7 @@ def trotterized_hardware_friendly_xyz_layers(
     hy: float = 0.0,
     hz: float = 0.0,
     order: int = 1,
+    method: str = "yoshida",
     dt: float,
     reps: int,
     collapse: bool = False,
@@ -200,7 +201,7 @@ def trotterized_hardware_friendly_xyz_layers(
     Orders implemented:
     - 1: E(dt) -> X(dt) -> Y(dt) -> Z(dt) -> O(dt)
     - 2: E(dt/2) -> X(dt/2) -> Y(dt/2) -> Z(dt/2) -> O(dt) -> Z(dt/2) -> Y(dt/2) -> X(dt/2) -> E(dt/2)
-    - 4: Yoshida construction using the symmetric 2nd order stepper.
+    - 4: Yoshida or Suzuki construction using the symmetric 2nd order stepper.
     
     For orders 2 and 4, boundary merging of the E layers is performed.
     If `collapse=True`, the consecutive single-qubit field layers (e.g. X, Y, Z)
@@ -210,6 +211,8 @@ def trotterized_hardware_friendly_xyz_layers(
         raise ValueError(f"n_sites must be even (got {n_sites})")
     if order not in (1, 2, 4):
         raise ValueError(f"order must be 1, 2, or 4 (got {order})")
+    if method not in ("yoshida", "suzuki"):
+        raise ValueError(f"method must be 'yoshida' or 'suzuki' (got {method})")
         
     # Determine efficient dtype if not provided
     if dtype is None:
@@ -294,17 +297,22 @@ def trotterized_hardware_friendly_xyz_layers(
 
     # --- 4th Order ---
     if order == 4:
-        # Yoshida coefficients
-        cbrt2 = 2.0 ** (1.0 / 3.0)
-        x1 = 1.0 / (2.0 - cbrt2)
-        x0 = 1.0 - 2.0 * x1  # negative
-        
-        # Each rep consists of 3 symmetric steps: S2(x1*dt) -> S2(x0*dt) -> S2(x1*dt)
-        # Total steps = 3 * reps
-        
         steps = []
-        for _ in range(reps):
-            steps.extend([x1 * dt, x0 * dt, x1 * dt])
+        if method == "yoshida":
+            # Yoshida coefficients
+            cbrt2 = 2.0 ** (1.0 / 3.0)
+            x1 = 1.0 / (2.0 - cbrt2)
+            x0 = 1.0 - 2.0 * x1  # negative
+            for _ in range(reps):
+                steps.extend([x1 * dt, x0 * dt, x1 * dt])
+        elif method == "suzuki":
+            # Suzuki constant p = 1 / (4 - 4^{1/3})
+            cbrt4 = 4.0 ** (1.0 / 3.0)
+            p = 1.0 / (4.0 - cbrt4)
+            k1 = p * dt
+            k2 = (1.0 - 4.0 * p) * dt
+            for _ in range(reps):
+                steps.extend([k1, k1, k2, k1, k1])
             
         num_substeps = len(steps)
         
@@ -398,6 +406,7 @@ def trotterized_hardware_friendly_xyz_circuit(
     hy: float = 0.0,
     hz: float = 0.0,
     order: int = 1,
+    method: str = "yoshida",
     dt: float,
     reps: int,
     collapse: bool = True,
@@ -409,14 +418,14 @@ def trotterized_hardware_friendly_xyz_circuit(
     layers = trotterized_hardware_friendly_xyz_layers(
         n_sites=n_sites, Jx=Jx, Jy=Jy, Jz=Jz,
         hx=hx, hy=hy, hz=hz,
-        order=order, dt=dt, reps=reps, collapse=collapse, dtype=dtype
+        order=order, method=method, dt=dt, reps=reps, collapse=collapse, dtype=dtype
     )
 
     return Circuit(
         n_sites=n_sites,
         layers=layers,
         hamiltonian_type="xyz_hardware_friendly",
-        trotter_params={"Jx": Jx, "Jy": Jy, "Jz": Jz, "hx": hx, "hy": hy, "hz": hz, "order": order, "dt": dt, "reps": reps, "collapse": collapse}
+        trotter_params={"Jx": Jx, "Jy": Jy, "Jz": Jz, "hx": hx, "hy": hy, "hz": hz, "order": order, "method": method, "dt": dt, "reps": reps, "collapse": collapse}
     )
 
 __all__ = [

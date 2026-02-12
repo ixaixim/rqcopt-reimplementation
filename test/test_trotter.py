@@ -37,14 +37,14 @@ H_full       = model.build_hamiltonian_matrix()            # 2ᴺ×2ᴺ dense ma
 U_exact = expm(-1j * total_time_t * H_full)
 
 # ---------------------- helpers for Trotter circuits --------------------- #
-def trotter_unitary(order: int, delta_t: float, n_steps: int) -> jnp.ndarray:
+def trotter_unitary(order: int, method: str, delta_t: float, n_steps: int) -> jnp.ndarray:
     """
     Build an `order`-th-order Suzuki-Trotter circuit and return its dense unitary
     matrix for a given Δt and number of steps n such that n * Δt = t.
     """
     layers = trotterized_heisenberg_layers(
         n_sites=n_sites, J=J, D=D, h=h,
-        order=order, dt=delta_t, reps=n_steps,
+        order=order, method=method, dt=delta_t, reps=n_steps,
         dtype=jnp.complex128
     )
     circ = Circuit(
@@ -64,9 +64,9 @@ print("Starting program...")
 
 # --- MODIFICATION START: Determine which orders to run based on the control variable ---
 if plot_order == 'all':
-    orders_to_run = [1, 2, 4]
+    orders_to_run = [(1, 'yoshida'), (2, 'yoshida'), (4, 'yoshida'), (4, 'suzuki')]
 elif plot_order in [1, 2, 4]:
-    orders_to_run = [plot_order]
+    orders_to_run = [(plot_order, 'yoshida')]
 else:
     raise ValueError(f"Invalid plot_order: '{plot_order}'. Must be 1, 2, 4, or 'all'.")
 print(f"Will calculate and plot for order(s): {orders_to_run}")
@@ -78,8 +78,8 @@ delta_t_grid = total_time_t / n_steps_grid  # Calculate dt to make total time ex
 
 
 # --- MODIFICATION START: Use a dictionary to store errors for flexibility ---
-# The keys are the Trotter orders and values are lists of errors.
-errors = {order: [] for order in orders_to_run}
+# The keys are the (order, method) pairs and values are lists of errors.
+errors = {om: [] for om in orders_to_run}
 # --- MODIFICATION END ---
 
 for i, n_steps in enumerate(n_steps_grid):
@@ -87,10 +87,10 @@ for i, n_steps in enumerate(n_steps_grid):
     print(f"Testing n_steps={n_steps} (Δt={dt:.4f})")
 
     # --- MODIFICATION START: Loop over the selected orders to calculate errors ---
-    for order in orders_to_run:
-        U_trotter = trotter_unitary(order=order, delta_t=dt, n_steps=n_steps)
+    for order, method in orders_to_run:
+        U_trotter = trotter_unitary(order=order, method=method, delta_t=dt, n_steps=n_steps)
         error = spectral_error(U_exact, U_trotter)
-        errors[order].append(error)
+        errors[(order, method)].append(error)
     # --- MODIFICATION END ---
 
 
@@ -99,27 +99,27 @@ plt.figure(figsize=(8, 6))
 
 # --- MODIFICATION START: Use dictionaries for plot styles for cleaner code ---
 plot_styles = {
-    1: {'marker': 'o', 'linestyle': '-', 'label': '1st-order'},
-    2: {'marker': 's', 'linestyle': '-', 'label': '2nd-order'},
-    4: {'marker': '^', 'linestyle': '-', 'label': '4th-order'},
+    (1, 'yoshida'): {'marker': 'o', 'linestyle': '-', 'label': '1st-order'},
+    (2, 'yoshida'): {'marker': 's', 'linestyle': '-', 'label': '2nd-order'},
+    (4, 'yoshida'): {'marker': '^', 'linestyle': '-', 'label': '4th-order (Yoshida)'},
+    (4, 'suzuki'):  {'marker': 'v', 'linestyle': '-', 'label': '4th-order (Suzuki)'},
 }
 # --- MODIFICATION END ---
 
 
 # --- MODIFICATION START: Loop through the results to plot data and reference lines ---
-for order, err_list in errors.items():
+for (order, method), err_list in errors.items():
     # Plot the calculated error data
-    style = plot_styles[order]
+    style = plot_styles[(order, method)]
     plt.loglog(delta_t_grid, err_list, **style)
 
     # Plot the corresponding reference slope O(Δt^order)
-    # Choose a prefactor so the line goes through that data point
-    # prefactor = err_list[0] / (delta_t_grid[0]**order)
-    prefactor = err_list[-1] / (delta_t_grid[-1]**order) # New way
-
-    ref_y = prefactor * (delta_t_grid**order)
-    ref_label = rf'O($\Delta t^{order}$) ref.'
-    plt.loglog(delta_t_grid, ref_y, '--', label=ref_label)
+    # Only plot reference line once per order to avoid clutter
+    if method == 'yoshida':
+        prefactor = err_list[-1] / (delta_t_grid[-1]**order)
+        ref_y = prefactor * (delta_t_grid**order)
+        ref_label = rf'O($\Delta t^{order}$) ref.'
+        plt.loglog(delta_t_grid, ref_y, '--', label=ref_label)
 # --- MODIFICATION END ---
 
 

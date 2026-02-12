@@ -175,11 +175,13 @@ run/heisenberg/results/
 run/heisenberg/model_list.txt
 scratchpad.txt
 
+*.csv
 *.png
 *.pdf
 *.out
 *.txt
 *.npz
+*.npy
 !requirements.txt
 
 # other
