@@ -4,7 +4,7 @@ import pytest
 
 import rqcopt_mpo.jax_config  # ensure JAX dtype/config is initialized
 
-from rqcopt_mpo.optimization.parametrized_adam.utils import (
+from rqcopt_mpo.optimization.archived.parametrized_adam.utils import (
     param_grad_rx,
     param_grad_ry,
     param_grad_rz,

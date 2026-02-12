@@ -1,3 +1,5 @@
+import rqcopt_mpo.jax_config
+
 import numpy as np
 import jax.numpy as jnp
 import pytest
@@ -41,7 +43,7 @@ def test_compute_trace_matches_env_contraction(n_sites, n_layers_init, n_layers_
     )
     target.sort_layers()
     target_matrix = target.to_matrix()
-    mpo_target = circuit_to_mpo(target)
+    mpo_target = circuit_to_mpo(target, max_bondim=None)
     mpo_target.left_canonicalize()
 
     # Init circuit to be compared against target

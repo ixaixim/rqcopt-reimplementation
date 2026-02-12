@@ -119,7 +119,7 @@ def _contract_circuit_layers(mpo: MPO, circuit: Circuit, max_bondim: Optional[in
         direction = 'right_to_left' if direction == 'left_to_right' else 'left_to_right'
     return mpo
 
-def circuit_to_mpo(circuit: Circuit, max_bondim: Optional[int] = None, svd_cutoff: float = 1e-12):
+def circuit_to_mpo(circuit: Circuit, max_bondim: Optional[int] = 128, svd_cutoff: Optional[float] = 0.0):
     # create from circuit
     # create an id mpo and place it at the beginning (bottom) of the circuit 
     # absorb layers from above

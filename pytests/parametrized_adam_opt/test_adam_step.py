@@ -4,7 +4,7 @@ import pytest
 
 import rqcopt_mpo.jax_config  # ensure JAX dtype/config is initialized
 
-from rqcopt_mpo.optimization.parametrized_adam.adam import Adam
+from rqcopt_mpo.optimization.weyl_optimizer.adam import Adam
 
 
 def test_adam_step_single_gate_with_stub_grad():
