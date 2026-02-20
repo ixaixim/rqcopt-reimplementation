@@ -8,26 +8,7 @@ import rqcopt_mpo.jax_config  # noqa: F401
 
 from rqcopt_mpo.circuit.circuit_builder import generate_random_circuit
 from rqcopt_mpo.mpo.mpo_builder import circuit_to_mpo
-
-
-def _hs_inner_product_from_mpo(A_mpo, B_mpo):
-    """
-    Compute Tr(A^\dagger B) where A_mpo, B_mpo are MPOs with site tensors shaped (Dl, d_up, d_down, Dr).
-    """
-    # Conjugate transpose A (dagger) at the MPO level
-    A_dag = A_mpo.dagger()
-
-    # Left environment starts as (1,1)
-    L_env = jnp.eye(1).reshape(1, 1)
-
-    # Contract site by site.
-    # Einsum indices follow the original:
-    # L_env: (a,e), A[i]: (a,b,c,d), B[i]: (e,c,b,f) -> new env (d,f)
-    for i in range(len(A_dag)):
-        L_env = jnp.einsum('ae, abcd, ecbf -> df', L_env, A_dag[i], B_mpo[i])
-
-    # scalar overlap
-    return L_env[0, 0]
+from rqcopt_mpo.tensor_network.core_ops_helpers import hs_inner_product_from_mpo
 
 
 @pytest.mark.parametrize(
@@ -75,7 +56,7 @@ def test_hilbert_schmidt_product_mpo_matches_matrix(n_sites, seed_A, seed_B, n_l
     explicit = np.trace(np.conjugate(A_matrix).T @ B_matrix)
 
     # ---- MPO contraction version ----
-    mpo_val = _hs_inner_product_from_mpo(A_mpo, B_mpo)
+    mpo_val = hs_inner_product_from_mpo(A_mpo, B_mpo)
     mpo_val = np.asarray(mpo_val)  # convert JAX array to NumPy scalar
 
     # ---- Assertions ----

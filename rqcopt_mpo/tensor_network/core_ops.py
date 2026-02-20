@@ -2,7 +2,7 @@ import rqcopt_mpo.jax_config
 
 import jax.numpy as jnp
 import numpy as np # Used for np.prod
-from scipy.linalg import rq # RQ decomposition is readily available in SciPy # NOTE: this cannot be accelerated with jax (we formulate an alternative suggestion when using this function.)
+# from scipy.linalg import rq # RQ decomposition is readily available in SciPy # NOTE: this cannot be accelerated with jax (we formulate an alternative suggestion when using this function.)
 from rqcopt_mpo.circuit.circuit_dataclasses import GateLayer, Gate
 from rqcopt_mpo.mpo.mpo_dataclass import MPO
 from rqcopt_mpo.utils.utils import gate_map
@@ -87,16 +87,15 @@ def canonicalize_local_tensor(
         # Target shape for M: (l, po*pi*r)
         matrix_to_decompose = tensor.reshape((l_dim, po_dim * pi_dim * r_dim))
 
-        # Perform RQ decomposition using SciPy's rq: M = R @ Q
-        # R will have shape (l, new_l), Q will have shape (new_l, po*pi*r)
-        # Note: rq returns R, Q
-        # Convert matrix to numpy temporarily as scipy.linalg.rq expects numpy arrays
-        # If extreme performance is needed and SciPy dependency is undesired, you could implement RQ using QR on the transpose, but scipy.linalg.rq is convenient.
-        R_factor, Q = rq(np.asarray(matrix_to_decompose), mode='economic')
-
-        # Convert results back to JAX arrays
-        R_factor = jnp.asarray(R_factor)
-        Q = jnp.asarray(Q)
+        # Perform RQ decomposition via QR of transpose
+        # M = R @ Q
+        # M.T = Q.T @ R.T = Q_prime @ R_prime
+        # So Q = Q_prime.T, R = R_prime.T
+        matrix_T = matrix_to_decompose.T
+        Q_prime, R_prime = jnp.linalg.qr(matrix_T, mode='reduced')
+        
+        Q = Q_prime.T
+        R_factor = R_prime.T
 
         # Reshape Q back into a 4D tensor: (new_l, po, pi, r)
         new_l_dim = Q.shape[0]
@@ -257,13 +256,14 @@ def compress_SVD(
 ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, int]:
     """
     Truncates SVD results based on maximum bond dimension and/or cutoff.
+    This version performs physical truncation (changes array shapes),
+    which is memory-efficient but not JIT-compatible with dynamic shapes.
 
     Args:
         u: Left singular vectors.
         s: Singular values (1D array, sorted descending).
         vh: Right singular vectors (vh = v.conj().T).
         max_bondim: The maximum number of singular values to keep.
-                    If None, determined by cutoff.
         cutoff: Singular values below this threshold (relative to the largest)
                 are discarded.
 
@@ -274,27 +274,32 @@ def compress_SVD(
         - vh_trunc: Truncated right singular vectors.
         - k_trunc: The number of singular values kept.
     """
-    if s.size == 0: # Handle empty singular values case
+    if s.size == 0:
         return u, s, vh, 0
-        
-    # Determine truncation based on cutoff
-    k_cutoff = int(jnp.sum(s / s[0] > cutoff))
 
-    # Determine truncation based on max_bondim
-    if max_bondim is None:
-        k_bondim = s.size
+    # Determine dynamic rank based on cutoff
+    if cutoff > 0.0:
+        denom = jnp.where(s[0] > 0, s[0], 1.0)
+        k_cutoff = jnp.sum(s / denom > cutoff)
     else:
-        k_bondim = min(int(max_bondim), s.size) # Ensure max_bondim <= rank
+        k_cutoff = s.size
 
-    # Final truncation dimension
-    k_trunc = min(k_cutoff, k_bondim)
+    # Cap by max_bondim if provided
+    if max_bondim is not None:
+        k_trunc = jnp.minimum(k_cutoff, max_bondim)
+    else:
+        k_trunc = k_cutoff
 
-    # Truncate
+    # Ensure at least one singular value is kept and cast to concrete int for slicing
+    k_trunc = int(jnp.maximum(k_trunc, 1))
+
+    # Perform physical truncation (slicing)
     u_trunc = u[:, :k_trunc]
     s_trunc = s[:k_trunc]
     vh_trunc = vh[:k_trunc, :]
 
     return u_trunc, s_trunc, vh_trunc, k_trunc
+
 
 def split_tensor_into_half_canonical_mpo_pair(
     merged_tensor: jnp.ndarray,
@@ -371,16 +376,9 @@ def split_tensor_into_half_canonical_mpo_pair(
     # --- Truncate (Compress) ---
     U_trunc, S_trunc, Vh_trunc, k_trunc = compress_SVD(U, S, Vh, max_bondim, svd_cutoff)
 
-    if k_trunc == 0:
-        print("Warning: SVD resulted in zero bond dimension after truncation.")
-        new_bond_dim = 1 # Keep bond dim 1 for consistency
-        mpo1 = jnp.zeros((l_dim, p1o_dim, p1i_dim, new_bond_dim), dtype=merged_tensor.dtype)
-        mpo2 = jnp.zeros((new_bond_dim, p2o_dim, p2i_dim, r_dim), dtype=merged_tensor.dtype)
-        # Optionally, return identity matrices scaled by zero?
-        return mpo1, mpo2
-
     # --- Form Half-Canonical Pair and Reshape Back ---
-    new_bond_dim = k_trunc
+    # Use static shape of truncated U to determine new bond dimension for reshape
+    new_bond_dim = U_trunc.shape[1]
     S_mat = jnp.diag(S_trunc) # Convert 1D S_trunc to diagonal matrix
 
     if canonical_mode == 'left':
@@ -513,8 +511,7 @@ def contract_mpo_with_layer_right_to_left(
             
             mpo_res_tensors[i] = mpo_i_final
 
-            # 6. Update R factor and decrement loop counter
-            R_to_carry_left = R_new
+            # 6. Decrement loop counter
             i -= 2
 
         else:
@@ -720,10 +717,3 @@ def contract_mpo_with_layer(
         return contract_mpo_with_layer_right_to_left(mpo_init, layer, layer_is_below, max_bondim, svd_cutoff)
     else:
         raise ValueError("Please specify either either as 'left_to_right' or 'right_to_left'.")
-# def contract_mpo_with_layer(mpo: List[jnp.ndarray], layer: GateLayer, direction: str, max_bondim: int, layer_is_below: bool, **kwargs) -> List[jnp.ndarray]:
-#     pass
-
-
-# def contract_circuit_mpo(circuit: Circuit, mpo: MPO, max_bondim: int) -> MPO:
-#     pass
-

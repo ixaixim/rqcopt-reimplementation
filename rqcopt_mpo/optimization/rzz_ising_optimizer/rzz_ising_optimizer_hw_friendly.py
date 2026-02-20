@@ -1,6 +1,8 @@
 import rqcopt_mpo.jax_config
 import jax.numpy as jnp
+import jax
 from typing import Callable, List, Optional
+import rqcopt_mpo.jax_pytree_registration  # Registers dataclasses as Pytrees
 
 from rqcopt_mpo.circuit.circuit_dataclasses import Circuit
 from rqcopt_mpo.mpo.mpo_dataclass import MPO
@@ -152,6 +154,7 @@ def optimize(
         bias_correction: bool = True,
         callback: Optional[Callable[..., bool]] = None,
         init_vertical_sweep = "top-down",
+        use_ad: bool = False,
 ):
     new_circ = circ.copy()
     params_tree, meta_tree = extract_params_tree(new_circ)
@@ -159,20 +162,28 @@ def optimize(
     opt = Adam(lr, betas, eps, clip_grad_norm, bias_correction)
     params_array = opt.prepare_layout_from_trees(params_tree, meta_tree)
 
-    # Register our HW friendly gradient
-    opt.register_param_grad("Ising_hw_1rzz", param_grad_rzz_ising_1rzz)
-    opt.register_param_grad("Ising_hw_1q", param_grad_rzz_ising_1q)
+    if use_ad:
+        # Define generators for AD
+        dtype = circ.dtype
+        
+        def rzz_gen(t):
+            return _rzz_matrix(t[0], dtype=dtype)
+        
+        def q1_gen(t):
+            return _compose_k_from_zyz(t[0], t[1], t[2], dtype=dtype)
+            
+        opt.register_param_grad("Ising_hw_1rzz", opt.make_ad_param_grad(rzz_gen))
+        opt.register_param_grad("Ising_hw_1q", opt.make_ad_param_grad(q1_gen))
+    else:
+        opt.register_param_grad("Ising_hw_1rzz", param_grad_rzz_ising_1rzz)
+        opt.register_param_grad("Ising_hw_1q", param_grad_rzz_ising_1q)
+
 
     history: List[float] = []
     
     for it in range(max_steps):
-        overlap, grads_ordered, info = cost_and_euclidean_grad(
-            new_circ,
-            mpo_ref,
-            vertical_sweep=init_vertical_sweep, 
-            max_bondim_env=max_bondim_env,
-            svd_cutoff=svd_cutoff,
-        )
+        overlap, grads_ordered, info = cost_and_euclidean_grad(new_circ, mpo_ref, max_bondim_env=max_bondim_env, svd_cutoff=svd_cutoff, vertical_sweep=init_vertical_sweep)
+
         
         params_array, _state, _stats = opt.step(
             params_array,

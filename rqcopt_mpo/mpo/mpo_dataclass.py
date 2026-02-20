@@ -63,12 +63,11 @@ class MPO:
         1) complex-conjugate the data,
         2) swap the two physical legs  p_out ↔ p_in.
 
-        The order of sites along the chain is left unchanged, because
-        the qubits themselves stay in the same order – only bra/ket
-        roles swap.  
-        
-        Canonical flags are reset because daggering exchanges
-        “left-canonical” with “right-canonical”.
+        The order of sites and the bond dimensions are left unchanged.
+        This preserves the site-to-qubit mapping.
+
+        Note: Since bond legs are not swapped and the site order is not reversed,
+        the canonical form (left or right) is preserved rather than exchanged.
         """
         dag_tensors: List[jnp.ndarray] = [
             # conj()   – complex conjugate
@@ -79,8 +78,8 @@ class MPO:
 
         return MPO(
             tensors=dag_tensors,
-            is_left_canonical=self.is_right_canonical,
-            is_right_canonical=self.is_left_canonical,
+            is_left_canonical=self.is_left_canonical, # be careful!! should check whether this change is breaking some operations or tests, like hs_inner_product (the left and right bonds are not swapped, so  )
+            is_right_canonical=self.is_right_canonical,
             norm=self.norm, 
             is_normalized=self.is_normalized
         )

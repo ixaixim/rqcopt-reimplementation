@@ -52,3 +52,10 @@ The test/ folder contains instead some older tests, and tests that I want to run
 # Qiskit functions
 In case questions concern Functions that are inherited from Qiskit or Pennylane: read the online documentation for Qiskit and Pennylane.
 
+# For now
+The dagger method in mpo_dataclass should in principle also switch the bond legs, not just the physical legs, changing the canonicity of the MPO. Applying this correction would require to reverse the list of the mpo and change a bunch of additional core functions that depend on it. For simplicity, we keep the current code, where the bond dimensions are not transposed, and therefore the canonicity is preserved. 
+In case later we decide to change also the bond legs to be more accurate in our mathematical picture, here are the affected areas that need change: 
+- rqcopt_mpo/mpo/mpo_dataclass.py: dagger() (must reverse list) and to_matrix() (must handle reversed order if called on a daggered MPO).
+- rqcopt_mpo/tensor_network/core_ops_helpers.py: hs_inner_product_from_mpo() needs site-index remapping.
+- rqcopt_mpo/optimization/optimizer.py: All sweep logic (_layer_pass_left_to_right, etc.) and environment calculations must be updated to map mpo_ref indices back to physical site indices.
+- rqcopt_mpo/optimization/gradient.py: compute_gate_environment_tensor would need to pull the correct tensor from the reversed reference.
