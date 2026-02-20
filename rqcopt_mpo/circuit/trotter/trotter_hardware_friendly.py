@@ -60,16 +60,18 @@ def _single_layer_interaction(
         raise ValueError(f"parity must be 'even' or 'odd', got {parity}")
 
     # Build the evolution matrix: exp(-i * coeff * H_int)
-    # We pass hx=hy=hz=0.0 and include_field=False to ensure only Jx, Jy, Jz terms are present.
+    # We pass hx/y/z_left/right=0.0 to ensure only Jx, Jy, Jz interaction terms are present.
     U_local = _local_evolution_xyz(
         Jx=Jx,
         Jy=Jy,
         Jz=Jz,
-        hx=0.0,
-        hy=0.0,
-        hz=0.0,
+        hx_left=0.0,
+        hy_left=0.0,
+        hz_left=0.0,
+        hx_right=0.0,
+        hy_right=0.0,
+        hz_right=0.0,
         coeff=coeff,
-        include_field=False,
         dtype=dtype,
     )
 
@@ -198,7 +200,7 @@ def trotterized_hardware_friendly_xyz_layers(
     The Hamiltonian is split as:
     H = H_even + H_X + H_Y + H_Z + H_odd
     
-    Orders implemented:
+    Orders implemented: N
     - 1: E(dt) -> X(dt) -> Y(dt) -> Z(dt) -> O(dt)
     - 2: E(dt/2) -> X(dt/2) -> Y(dt/2) -> Z(dt/2) -> O(dt) -> Z(dt/2) -> Y(dt/2) -> X(dt/2) -> E(dt/2)
     - 4: Yoshida or Suzuki construction using the symmetric 2nd order stepper.
@@ -206,6 +208,14 @@ def trotterized_hardware_friendly_xyz_layers(
     For orders 2 and 4, boundary merging of the E layers is performed.
     If `collapse=True`, the consecutive single-qubit field layers (e.g. X, Y, Z)
     are merged into a single layer of gates.
+    NOTE: HIGHLY INEFFICIENT FOR ISING MODEL (you are better off with different split)
+    NOTE: the _single_layer_combined_field creates U_combined = U_Z @ U_Y @ U_X, but this introduces trotter ERROR between the field themselves. You can avoid this
+    by exponentiating the sum of the matrices rather than multiplying the exponentials. 
+    NOTE: REGARDING THE ORDER: we do Even Field Odd order. The sequence is a valid second order splitting that will guarantee the correct asymptotic behavior. 
+            however, the physical error depends on the leading error coefficient, which is governed by nested commutators from the BCH expansion.
+        For the sequence $e^{A/2} e^B e^{A/2}$, the leading error term is proportional to:$$-\frac{1}{24} [A, [A, B]] + \frac{1}{12} [B, [B, A]]$$Whether your sequence or the alternative produces a smaller absolute error depends entirely on the parameters of your system:If your fields are much stronger than your interactions ($h \gg J$), placing the fields on the outside often minimizes the prefactor.If your interactions are much stronger than your fields ($J \gg h$), placing the interactions on the outside (like you did) can be slightly more accurate.
+
+
     """
     if n_sites % 2:
         raise ValueError(f"n_sites must be even (got {n_sites})")

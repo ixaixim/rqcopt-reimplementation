@@ -31,8 +31,8 @@ def run_experiment():
     REF_REPS = 20 
     REF_NORMALIZE = True
     
-    # Physics settings (XXX Heisenberg)
-    N_SITES = 6
+    # Physics settings 
+    N_SITES =10
     JX = 0.0
     JY = 0.0
     JZ = 1.0
@@ -42,6 +42,7 @@ def run_experiment():
     TOTAL_TIME = 2.0
     loss_name = "HST" # can be either HST or frobenius
     max_bondim_ref = 64
+    max_bondim_ansatz = 128
 
 
     # Sweep settings
@@ -59,22 +60,32 @@ def run_experiment():
     # }
 
     # Output file
-    output_csv = os.path.join(os.path.dirname(__file__), "trotter_comparison_results.csv")
+    output_csv = os.path.join(os.path.dirname(__file__), f"trotter_comparison_results_{N_SITES}.csv")
 
     # --- 1. Construct Reference MPO ---
     print(f"\nNumber of sites: {N_SITES}")
     print(f"Building Reference MPO (Order={REF_ORDER}, Reps={REF_REPS}, T={TOTAL_TIME})...")
     dt_ref = TOTAL_TIME / REF_REPS
     
-    circ_ref = trotterized_hardware_friendly_xyz_circuit(
+    circ_ref = trotterized_xyz_circuit(
         n_sites=N_SITES,
-        Jx=JX, Jy=JY, Jz=JZ, hx=HX, hy=HY, hz=HZ,
+        Jx=JX, Jy=JY, Jz=JZ,
+        hx=HX, hy=HY, hz=HZ,
         order=REF_ORDER,
         dt=dt_ref,
         reps=REF_REPS,
         method='suzuki',
-        collapse=True
+        dtype=jnp.complex128
     )
+    # circ_ref = trotterized_hardware_friendly_xyz_circuit(
+    #     n_sites=N_SITES,
+    #     Jx=JX, Jy=JY, Jz=JZ, hx=HX, hy=HY, hz=HZ,
+    #     order=REF_ORDER,
+    #     dt=dt_ref,
+    #     reps=REF_REPS,
+    #     method='suzuki',
+    #     collapse=True
+    # )
 
     mpo_ref = circuit_to_mpo(circ_ref, max_bondim=max_bondim_ref, svd_cutoff=0.0)
     mpo_ref.left_canonicalize(normalize=REF_NORMALIZE) 
@@ -91,17 +102,27 @@ def run_experiment():
             dt = TOTAL_TIME / reps
             
             # Build approximate circuit
-            circ_approx = trotterized_hardware_friendly_xyz_circuit(
+            circ_approx = trotterized_xyz_circuit(
                 n_sites=N_SITES,
-                Jx=JX, Jy=JY, Jz=JZ, hx=HX, hy=HY, hz=HZ,
+                Jx=JX, Jy=JY, Jz=JZ,
+                hx=HX, hy=HY, hz=HZ,
                 order=order,
                 dt=dt,
                 reps=int(reps),
-                method='suzuki', # 'yoshida' or 'suzuki
-                collapse=True
+                method='suzuki',
+                dtype=jnp.complex128
             )
+            # circ_approx = trotterized_hardware_friendly_xyz_circuit(
+            #     n_sites=N_SITES,
+            #     Jx=JX, Jy=JY, Jz=JZ, hx=HX, hy=HY, hz=HZ,
+            #     order=order,
+            #     dt=dt,
+            #     reps=int(reps),
+            #     method='suzuki', # 'yoshida' or 'suzuki
+            #     collapse=True
+            # )
             
-            mpo_approx = circuit_to_mpo(circ_approx, max_bondim=128, svd_cutoff=1e-12)
+            mpo_approx = circuit_to_mpo(circ_approx, max_bondim=max_bondim_ansatz, svd_cutoff=0.0)
             mpo_approx.left_canonicalize(normalize=False)
             
             # Compute Overlap Tr(U_ref^dag U_approx)

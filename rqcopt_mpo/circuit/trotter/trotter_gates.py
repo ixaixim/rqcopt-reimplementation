@@ -57,9 +57,9 @@ def _local_evolution(
     *,
     J: float,
     D: float,
-    h: float,
+    h_left: float,
+    h_right: float,
     coeff: float,
-    include_field: bool,
     dtype: jnp.dtype,
 ) -> jnp.ndarray:
     """e^{-i · coeff · H_local} as a **jax.numpy** array (shape 4×4)."""
@@ -72,10 +72,9 @@ def _local_evolution(
     ZZ = two_qubit(Z, Z)
 
     H = J * (XX + YY) + D * ZZ
-    if include_field:
-        IZ = two_qubit(I, Z)
-        ZI = two_qubit(Z, I)
-        H = H + h * (IZ + ZI)
+    IZ = two_qubit(I, Z)
+    ZI = two_qubit(Z, I)
+    H = H + h_left * ZI + h_right * IZ
     H = jnp.asarray(H, dtype=dtype)
     return jsp.expm(-1j * coeff * H)
 
@@ -85,11 +84,13 @@ def _local_evolution_xyz(
     Jx: float,
     Jy: float,
     Jz: float,
-    hx: float,
-    hy: float,
-    hz: float,
+    hx_left: float,
+    hy_left: float,
+    hz_left: float,
+    hx_right: float,
+    hy_right: float,
+    hz_right: float,
     coeff: float,
-    include_field: bool,
     dtype: jnp.dtype,
 ) -> jnp.ndarray:
     """e^{-i · coeff · H_local} for XYZ model as a **jax.numpy** array (shape 4×4)."""
@@ -103,15 +104,16 @@ def _local_evolution_xyz(
     ZZ = two_qubit(Z, Z)
 
     H = Jx * XX + Jy * YY + Jz * ZZ
-    if include_field:
-        IX = two_qubit(I, X)
-        XI = two_qubit(X, I)
-        IY = two_qubit(I, Y)
-        YI = two_qubit(Y, I)
-        IZ = two_qubit(I, Z)
-        ZI = two_qubit(Z, I)
-        
-        H = H + hx * (IX + XI) + hy * (IY + YI) + hz * (IZ + ZI)
+    IX = two_qubit(I, X)
+    XI = two_qubit(X, I)
+    IY = two_qubit(I, Y)
+    YI = two_qubit(Y, I)
+    IZ = two_qubit(I, Z)
+    ZI = two_qubit(Z, I)
+    
+    H = H + hx_left * XI + hx_right * IX
+    H = H + hy_left * YI + hy_right * IY
+    H = H + hz_left * ZI + hz_right * IZ
         
     H = jnp.asarray(H, dtype=dtype)
     return jsp.expm(-1j * coeff * H)
@@ -137,30 +139,38 @@ def single_layer_trotterized_heisenberg(
     # --- Choose the bond list -------------------------------------------------------
     if parity == "even":
         bonds: Sequence[int] = range(0, n_sites - 1, 2)
-        include_field = True
         is_odd_layer = False
     else:  # "odd"
         bonds = range(1, n_sites - 1, 2)
-        include_field = False
         is_odd_layer = True
-
-    # --- Pre-build the evolution matrix (shared by every gate in the layer) --------
-    U_local = _local_evolution(
-        J=J,
-        D=D,
-        h=h,
-        coeff=coeff,
-        include_field=include_field,
-        dtype=dtype,
-    )
 
     # --- Populate the GateLayer -----------------------------------------------------
     layer = GateLayer(layer_index=layer_idx, is_odd=is_odd_layer, n_sites=n_sites)
 
     for left in bonds:
+        right = left + 1
+        
+        # Distribute field h: half for inner qubits, full for boundary
+        h_left = h
+        if left > 0:
+            h_left /= 2.0
+            
+        h_right = h
+        if right < n_sites - 1:
+            h_right /= 2.0
+            
+        U_local = _local_evolution(
+            J=J,
+            D=D,
+            h_left=h_left,
+            h_right=h_right,
+            coeff=coeff,
+            dtype=dtype,
+        )
+        
         gate = Gate(
             matrix=U_local,
-            qubits=(left, left + 1),
+            qubits=(left, right),
             layer_index=layer_idx,
             name="exp(-iH)",
         )
@@ -192,33 +202,39 @@ def single_layer_trotterized_xyz(
     # --- Choose the bond list -------------------------------------------------------
     if parity == "even":
         bonds: Sequence[int] = range(0, n_sites - 1, 2)
-        include_field = True
         is_odd_layer = False
     else:  # "odd"
         bonds = range(1, n_sites - 1, 2)
-        include_field = False
         is_odd_layer = True
-
-    # --- Pre-build the evolution matrix (shared by every gate in the layer) --------
-    U_local = _local_evolution_xyz(
-        Jx=Jx,
-        Jy=Jy,
-        Jz=Jz,
-        hx=hx,
-        hy=hy,
-        hz=hz,
-        coeff=coeff,
-        include_field=include_field,
-        dtype=dtype,
-    )
 
     # --- Populate the GateLayer -----------------------------------------------------
     layer = GateLayer(layer_index=layer_idx, is_odd=is_odd_layer, n_sites=n_sites)
 
     for left in bonds:
+        right = left + 1
+        
+        # Distribute fields: half for inner qubits, full for boundary
+        # Left qubit
+        hxl, hyl, hzl = hx, hy, hz
+        if left > 0:
+            hxl /= 2.0; hyl /= 2.0; hzl /= 2.0
+            
+        # Right qubit
+        hxr, hyr, hzr = hx, hy, hz
+        if right < n_sites - 1:
+            hxr /= 2.0; hyr /= 2.0; hzr /= 2.0
+            
+        U_local = _local_evolution_xyz(
+            Jx=Jx, Jy=Jy, Jz=Jz,
+            hx_left=hxl, hy_left=hyl, hz_left=hzl,
+            hx_right=hxr, hy_right=hyr, hz_right=hzr,
+            coeff=coeff,
+            dtype=dtype,
+        )
+
         gate = Gate(
             matrix=U_local,
-            qubits=(left, left + 1),
+            qubits=(left, right),
             layer_index=layer_idx,
             name="exp(-iH)",
         )
