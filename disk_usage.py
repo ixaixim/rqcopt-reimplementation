@@ -45,4 +45,4 @@ def list_largest_folders(root_dir, limit=10):
 
 if __name__ == "__main__":
     # Change '.' to your specific project path if needed
-    list_largest_folders('./')
+    list_largest_folders('./experiments/rzz_ising_experiment')

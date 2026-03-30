@@ -10,6 +10,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import rqcopt_mpo.jax_config
 from rqcopt_mpo.circuit.trotter.trotter_hardware_friendly import trotterized_hardware_friendly_xyz_circuit
+from rqcopt_mpo.circuit.trotter.trotter_ising_hw_friendly import trotterized_ising_hw_friendly_circuit
 from rqcopt_mpo.circuit.trotter.trotter_circuit_builder import trotterized_xyz_circuit
 from rqcopt_mpo.mpo.mpo_builder import circuit_to_mpo
 from rqcopt_mpo.optimization.utils import overlap_to_loss
@@ -67,16 +68,16 @@ def run_experiment():
     print(f"Building Reference MPO (Order={REF_ORDER}, Reps={REF_REPS}, T={TOTAL_TIME})...")
     dt_ref = TOTAL_TIME / REF_REPS
     
-    circ_ref = trotterized_xyz_circuit(
-        n_sites=N_SITES,
-        Jx=JX, Jy=JY, Jz=JZ,
-        hx=HX, hy=HY, hz=HZ,
-        order=REF_ORDER,
-        dt=dt_ref,
-        reps=REF_REPS,
-        method='suzuki',
-        dtype=jnp.complex128
-    )
+    # circ_ref = trotterized_xyz_circuit(
+    #     n_sites=N_SITES,
+    #     Jx=JX, Jy=JY, Jz=JZ,
+    #     hx=HX, hy=HY, hz=HZ,
+    #     order=REF_ORDER,
+    #     dt=dt_ref,
+    #     reps=REF_REPS,
+    #     method='suzuki',
+    #     dtype=jnp.complex128
+    # )
     # circ_ref = trotterized_hardware_friendly_xyz_circuit(
     #     n_sites=N_SITES,
     #     Jx=JX, Jy=JY, Jz=JZ, hx=HX, hy=HY, hz=HZ,
@@ -86,6 +87,14 @@ def run_experiment():
     #     method='suzuki',
     #     collapse=True
     # )
+    circ_ref = trotterized_ising_hw_friendly_circuit(
+        n_sites=N_SITES,
+        J=JZ, hx=HX, hz=HZ,
+        dt=dt_ref,
+        reps=REF_REPS,
+        order=REF_ORDER,
+        dtype=jnp.complex128
+    )
 
     mpo_ref = circuit_to_mpo(circ_ref, max_bondim=max_bondim_ref, svd_cutoff=0.0)
     mpo_ref.left_canonicalize(normalize=REF_NORMALIZE) 
@@ -102,16 +111,16 @@ def run_experiment():
             dt = TOTAL_TIME / reps
             
             # Build approximate circuit
-            circ_approx = trotterized_xyz_circuit(
-                n_sites=N_SITES,
-                Jx=JX, Jy=JY, Jz=JZ,
-                hx=HX, hy=HY, hz=HZ,
-                order=order,
-                dt=dt,
-                reps=int(reps),
-                method='suzuki',
-                dtype=jnp.complex128
-            )
+            # circ_approx = trotterized_xyz_circuit(
+            #     n_sites=N_SITES,
+            #     Jx=JX, Jy=JY, Jz=JZ,
+            #     hx=HX, hy=HY, hz=HZ,
+            #     order=order,
+            #     dt=dt,
+            #     reps=int(reps),
+            #     method='suzuki',
+            #     dtype=jnp.complex128
+            # )
             # circ_approx = trotterized_hardware_friendly_xyz_circuit(
             #     n_sites=N_SITES,
             #     Jx=JX, Jy=JY, Jz=JZ, hx=HX, hy=HY, hz=HZ,
@@ -121,6 +130,14 @@ def run_experiment():
             #     method='suzuki', # 'yoshida' or 'suzuki
             #     collapse=True
             # )
+            circ_approx = trotterized_ising_hw_friendly_circuit(
+                n_sites=N_SITES,
+                J=JZ, hx=HX, hz=HZ,
+                dt=dt,
+                reps=int(reps),
+                order=order,
+                dtype=jnp.complex128
+            )
             
             mpo_approx = circuit_to_mpo(circ_approx, max_bondim=max_bondim_ansatz, svd_cutoff=0.0)
             mpo_approx.left_canonicalize(normalize=False)
