@@ -3,7 +3,11 @@ import rqcopt_mpo.jax_config
 from dataclasses import dataclass, field
 import numpy as np
 import jax.numpy as jnp # Or stick to numpy if preferred
-from typing import List, Optional, Tuple
+import jax
+from typing import List, Optional, Tuple, Dict, Any, Union
+from pathlib import Path
+import json
+import copy
 
 @dataclass
 class MPO:
@@ -456,3 +460,63 @@ class MPO:
 
         if n_show < self.n_sites:
             print(f"{indent}… ({self.n_sites - n_show} more sites)")
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize the MPO into JSON-friendly Python primitives."""
+        def _to_serializable(x):
+            if hasattr(x, "tolist"): # Covers np.ndarray, jax.Array
+                arr = np.asarray(x)
+                if arr.ndim == 0:
+                    return arr.item()
+                if np.iscomplexobj(arr):
+                    return {"__complex_array__": True, "real": arr.real.tolist(), "imag": arr.imag.tolist()}
+                return arr.tolist()
+            if isinstance(x, (list, tuple)):
+                return [_to_serializable(v) for v in x]
+            if isinstance(x, dict):
+                return {k: _to_serializable(v) for k, v in x.items()}
+            if isinstance(x, (np.generic,)):
+                return x.item()
+            return x
+
+        return {
+            "n_sites": self.n_sites,
+            "physical_dim_out": self.physical_dim_out,
+            "physical_dim_in": self.physical_dim_in,
+            "is_left_canonical": self.is_left_canonical,
+            "is_right_canonical": self.is_right_canonical,
+            "norm": _to_serializable(self.norm),
+            "is_normalized": self.is_normalized,
+            "tensors": [_to_serializable(t) for t in self.tensors],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'MPO':
+        """Rebuild an MPO from the structure produced by `to_dict`."""
+        def _restore_tensor(p):
+            if isinstance(p, dict) and p.get("__complex_array__"):
+                real = np.asarray(p.get("real", []))
+                imag = np.asarray(p.get("imag", []))
+                return jnp.array(real + 1j * imag)
+            if isinstance(p, list):
+                return jnp.array(p)
+            return p
+
+        tensors = [_restore_tensor(t) for t in data["tensors"]]
+        mpo = cls(tensors=tensors)
+        mpo.is_left_canonical = data.get("is_left_canonical", False)
+        mpo.is_right_canonical = data.get("is_right_canonical", False)
+        mpo.norm = data.get("norm")
+        mpo.is_normalized = data.get("is_normalized", False)
+        return mpo
+
+    def save_json(self, path: Union[str, Path], indent: int = 2) -> None:
+        """Persist the MPO to a JSON file."""
+        path = Path(path)
+        path.write_text(json.dumps(self.to_dict(), indent=indent))
+
+    @classmethod
+    def load_json(cls, path: Union[str, Path]) -> 'MPO':
+        """Load an MPO saved with `save_json`."""
+        path = Path(path)
+        return cls.from_dict(json.loads(path.read_text()))

@@ -1,86 +1,75 @@
 import rqcopt_mpo.jax_config
-
-from rqcopt_mpo.circuit.circuit_builder import generate_random_circuit
-from rqcopt_mpo.circuit.trotter.trotter_circuit_builder import trotterized_heisenberg_circuit
-from rqcopt_mpo.optimization.utils import overlap_to_loss
 import jax.numpy as jnp
-import numpy as np
+from pathlib import Path
+import sys
+from rqcopt_mpo.circuit.trotter.trotter_circuit_builder import trotterized_xyz_circuit
+from rqcopt_mpo.mpo.mpo_builder import circuit_to_mpo
+from rqcopt_mpo.mpo.mpo_dataclass import MPO
 
-n_sites = 4 # choose even number
-J = 1.0
-D = -1.0
-h = 0
-t = 0.5 # time of evolution
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(REPO_ROOT))
+from experiments.utils import get_reference_path
 
-reps = 10
-order = 4
-dt = t/reps
-dtype = jnp.complex128
-target_is_normalized = False
+def create_heisenberg_reference(
+    n_sites: int,
+    Jx: float, Jy: float, Jz: float,
+    hx: float = 0.0, hy: float = 0.0, hz: float = 0.0,
+    t: float = 1.0,
+    reps: int = 20,
+    order: int = 4,
+    dtype = jnp.complex128,
+    max_bondim_ref: int = 64,
+    canonicalize: str = "left",
+    normalize: bool = False,
+) -> MPO:
+    """
+    Generate a reference MPO for a Heisenberg-style Hamiltonian evolution.
+    """
+    dt = t / reps
+    
+    target_circ = trotterized_xyz_circuit(
+        n_sites=n_sites,
+        Jx=Jx, Jy=Jy, Jz=Jz,
+        hx=hx, hy=hy, hz=hz,
+        order=order,
+        method='suzuki',
+        dt=dt,
+        reps=reps,
+        dtype=dtype
+    )
+    
+    target_mpo = circuit_to_mpo(target_circ, max_bondim=max_bondim_ref, svd_cutoff=0.0)
+    
+    if canonicalize == "left":
+        target_mpo.left_canonicalize(normalize=normalize)
+    elif canonicalize == "right":
+        target_mpo.right_canonicalize(normalize=normalize)
+        
+    return target_mpo
+if __name__ == "__main__":
+    # Riemannian experiment reference
+    n_sites = 20
+    Jx = 0.0
+    Jy = 0.0
+    Jz = 1.0
+    hx = 0.75
+    hy = 0.0
+    hz = 0.6
+    t = 2.0
+    reps = 20
+    order = 4
 
-# set up target MPO
-target_circ = trotterized_heisenberg_circuit(    
-    n_sites=n_sites, J=J, D=D, h=h,
-    order=4, dt=dt, reps=reps,
-    dtype=dtype
-)
-target_matrix = target_circ.to_matrix()
-
-# set up quantum circuit
-
-reps = 3
-dt = t/reps
-init_circ = trotterized_heisenberg_circuit(
-    n_sites=n_sites,
-    J=J,
-    D=D,
-    dt=dt,
-    reps=reps,
-    order=2,
-    dtype=jnp.complex128,
-)
-
-print(f"initial circuit layers: {init_circ.num_layers}")
-
-init_matrix = init_circ.to_matrix()
-trace = np.trace(target_matrix.conjugate().T @ init_matrix)
-hst_cost = overlap_to_loss(trace, n_sites=n_sites, normalize=False)
-print(f"Overlap: {trace}")
-print(f"HST fidelity: {hst_cost}")
-
-
-random_seed = 42
-random_circuit = generate_random_circuit(
-    n_sites=n_sites,
-    n_layers=init_circ.num_layers,
-    seed=random_seed,
-    dtype=dtype,
-)
-
-random_matrix = random_circuit.to_matrix()
-
-
-def _unitarize(matrix: np.ndarray) -> np.ndarray:
-    q, r = np.linalg.qr(matrix)
-    diag = np.diag(r)
-    phases = np.where(np.abs(diag) > 0, diag / np.abs(diag), 1.0 + 0.0j)
-    return (q * phases.reshape(1, -1)).astype(matrix.dtype)
-
-
-noisy_circuit = random_circuit.copy()
-noise_rng = np.random.default_rng(random_seed + 1)
-
-for layer in noisy_circuit.layers:
-    for gate in layer.gates:
-        perturbation = 1e-3 * (
-            noise_rng.normal(size=gate.matrix.shape) + 1j * noise_rng.normal(size=gate.matrix.shape)
-        )
-        noisy_matrix = np.array(gate.matrix) + perturbation.astype(gate.matrix.dtype)
-        gate.matrix = _unitarize(noisy_matrix)
-
-noisy_matrix = noisy_circuit.to_matrix()
-
-pair_trace = np.trace(random_matrix.conjugate().T @ noisy_matrix)
-pair_hst = overlap_to_loss(pair_trace, n_sites=n_sites, normalize=False)
-print(f"Random vs noisy overlap: {pair_trace}")
-print(f"Random vs noisy HST fidelity: {pair_hst}")
+    mpo = create_heisenberg_reference(
+        n_sites=n_sites, Jx=Jx, Jy=Jy, Jz=Jz, hx=hx, hy=hy, hz=hz, t=t, reps=reps, order=order,
+        normalize=True
+    )
+    
+    # Save to a central location
+    ref_base_dir = REPO_ROOT / "experiments"
+    path = get_reference_path(
+        base_dir=ref_base_dir,
+        n_sites=n_sites, Jx=Jx, Jy=Jy, Jz=Jz, hx=hx, hy=hy, hz=hz, t=t, reps=reps, order=order
+    )
+    
+    mpo.save_json(path)
+    print(f"Saved unified reference to {path}")

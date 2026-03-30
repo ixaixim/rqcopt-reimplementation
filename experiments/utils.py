@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import jax.numpy as jnp
+import jax
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
@@ -174,6 +175,80 @@ def save_run_outputs(
 
     print(f"Saved loss to {loss_path} and circuit to {circuit_path}")
     return {"loss": loss_path, "circuit": circuit_path}
+
+def get_reference_path(
+    base_dir: Path,
+    n_sites: int,
+    Jx: float, Jy: float, Jz: float,
+    hx: float, hy: float, hz: float,
+    t: float,
+    reps: int,
+    order: int,
+) -> Path:
+    """Generate a consistent filename for the reference MPO."""
+    ref_dir = base_dir / "reference"
+    ref_dir.mkdir(parents=True, exist_ok=True)
+    
+    name = (f"ref_n{n_sites}_Jx{Jx}_Jy{Jy}_Jz{Jz}_hx{hx}_hy{hy}_hz{hz}_"
+            f"t{t}_reps{reps}_order{order}.json")
+    return ref_dir / name
+
+
+def save_experiment_json(
+    base_dir: Path,
+    method: str,
+    circuit: Circuit,
+    final_loss: float,
+    hamiltonian_params: dict,
+    trotter_params: dict,
+    optimization_params: dict,
+    loss_history: list[float],
+    additional_data: Optional[dict] = None,
+):
+    """
+    Save experiment results and metadata to a timestamped JSON file.
+    """
+    import datetime
+
+    def _serializable(obj):
+        if isinstance(obj, (np.ndarray, jax.Array)):
+            return obj.tolist()
+        if isinstance(obj, (np.float32, np.float64, jax.numpy.float32, jax.numpy.float64)):
+            return float(obj)
+        if isinstance(obj, (np.int32, np.int64, jax.numpy.int32, jax.numpy.int64)):
+            return int(obj)
+        if isinstance(obj, dict):
+            return {k: _serializable(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [_serializable(v) for v in obj]
+        return obj
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    data_dir = base_dir / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = f"run_{method}_{timestamp}.json"
+    filepath = data_dir / filename
+
+    payload = {
+        "method": method,
+        "final_loss": _serializable(final_loss),
+        "num_2q_layers": circuit.num_2q_layers,
+        "hamiltonian_params": _serializable(hamiltonian_params),
+        "trotter_params": _serializable(trotter_params),
+        "optimization_params": _serializable(optimization_params),
+        "loss_history": [_serializable(l) for l in loss_history],
+        "timestamp": timestamp,
+    }
+    
+    if additional_data:
+        payload.update(_serializable(additional_data))
+
+    with open(filepath, "w") as f:
+        json.dump(payload, f, indent=4)
+
+    print(f"Saved experiment results to {filepath}")
+
 
 def load_all_npz(data_dir: Path):
     """
