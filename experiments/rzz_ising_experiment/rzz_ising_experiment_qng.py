@@ -35,14 +35,13 @@ order_ref = 4
 dtype = jnp.complex128
 target_is_normalized = True
 
-max_steps = 100
+max_steps = 50 # Reduced for quick verification
 lr = 1e-3
 betas = (0.9, 0.999)
 eps = 1e-8
 clip_grad_norm = None
 max_bondim_env = 128
 svd_cutoff = 0.0
-use_qng = True
 
 patience = 15
 min_delta = 1e-9
@@ -84,11 +83,6 @@ reps = 3
 dt = t/reps
 order = 2
 
-# initial_circuit = trotterized_hardware_friendly_xyz_circuit(    
-#     n_sites=n_sites, Jx=J, Jy=J, Jz=D, hx=hx, hz=hz, 
-#     order=order, method='suzuki', dt=dt, reps=reps, collapse=True,
-#     dtype=dtype
-# )
 initial_circuit = trotterized_ising_hw_friendly_circuit(
     n_sites=n_sites,
     J=D, hx=hx, hz=hz,
@@ -99,18 +93,15 @@ initial_circuit = trotterized_ising_hw_friendly_circuit(
 
 print(f"Hamiltonian Parameters: J={J}, D={D}, hx={hx}, hz={hz}")
 print(f"Evolving time: {t}")
-# print(f"Initial circuit with {initial_circuit.num_2q_layers} layers")
-# initial_circuit.print_gates()
-# print(f"Initial circuit with {initial_circuit.num_layers} layers")
 
 # decompose and parameterize circuit.
-new_circ = rzz_decompose_ising_circuit(initial_circuit, order) # matrices are grouped and parametrized 
+new_circ = rzz_decompose_ising_circuit(initial_circuit, order) 
 print(f"Trotterization of order: {order} and reps: {reps}")
 print(f"New circuit with {new_circ.num_2q_layers} layers")
-# new_circ.print_gates()
 
 scheduler = ReduceLROnPlateau(factor=0.5, patience=5, min_lr=1e-6)
 
+print("Optimizing with Quantum Natural Gradient (QNG)")
 circ, loss = optimize(
     new_circ,
     target_mpo,
@@ -122,19 +113,16 @@ circ, loss = optimize(
     eps=eps,
     clip_grad_norm=clip_grad_norm,
     use_ad=True,
+    use_qng=True, # Enable QNG
     callback=early_stop, 
     scheduler=scheduler,
-    use_qng=use_qng
 )
 
-# add to csv the data, along with the 
-# lr_tag = f"{lr:.0e}".replace(".", "p")
-# save_data_npz(base_dir, f'loss_hw_friendly_sites{n_sites}_reps_{reps}_lr_{lr_tag}', loss, method='HW_Friendly')
-base_dir = here = Path(__file__).resolve().parent
+base_dir = Path(__file__).resolve().parent
 
 save_experiment_json(
     base_dir=base_dir,
-    method="ising-hw-friendly",
+    method="ising-qng",
     circuit=circ,
     final_loss=loss[-1],
     hamiltonian_params={"n_sites": n_sites, "J": J, "D": D, "hx": hx, "hz": hz, "t": t},
@@ -148,7 +136,7 @@ save_experiment_json(
         "svd_cutoff": svd_cutoff,
         "patience": patience,
         "min_delta": min_delta,
-        "use_qng": use_qng,
+        "use_qng": True,
     },
     loss_history=loss
 )

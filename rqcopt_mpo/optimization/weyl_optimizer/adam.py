@@ -52,6 +52,8 @@ class Adam:
 
             # registry: name -> fn(theta, dL_dG, overlap, meta, n_sites, is_normalized) -> grad_theta
             self.param_grad_fns: Dict[str, Callable[..., jnp.ndarray]] = {}
+            # registry: name -> fn(theta, meta) -> G_inv (matrix or scalar)
+            self.metric_inv_fns: Dict[str, Callable[[jnp.ndarray, dict], jnp.ndarray]] = {}
 
     # NOTE: in future versions, do not convert to flat vector, keep pytree
     # ---------------------------------------------------------------------
@@ -108,6 +110,13 @@ class Adam:
     # fn signature: fn(theta: (p,), dL_dG: array, meta: dict) -> grad_theta: (p,)
     def register_param_grad(self, gate_name: str, fn: Callable[..., jnp.ndarray]):
         self.param_grad_fns[gate_name] = fn
+
+    def register_metric_inv(self, gate_name: str, fn: Callable[[jnp.ndarray, dict], jnp.ndarray]):
+        """
+        Registers a function that computes the inverse of the Fubini-Study metric tensor G.
+        The natural gradient is then computed as g_nat = G_inv @ g_euclid.
+        """
+        self.metric_inv_fns[gate_name] = fn
 
     @staticmethod
     def make_ad_param_grad(gate_fn: Callable[[jnp.ndarray], jnp.ndarray]):
@@ -175,6 +184,15 @@ class Adam:
                     "Use Adam.register_param_grad(name, fn)."
                 )
             g_gate = fn(theta, dL_dG, overlap, slot.meta, n_sites, is_normalized)       # shape (e-s,)
+
+            # --- 1.b) Optional Natural Gradient Scaling ---
+            if slot.name in self.metric_inv_fns:
+                G_inv = self.metric_inv_fns[slot.name](theta, slot.meta)
+                if G_inv.ndim == 2:
+                    g_gate = G_inv @ g_gate
+                else:
+                    g_gate = G_inv * g_gate
+
             # ensure shapes match
             if g_gate.shape != (e - s,):
                 raise ValueError(f"param-grad for gate '{slot.name}' has shape {g_gate.shape}, expected {(e-s,)}")

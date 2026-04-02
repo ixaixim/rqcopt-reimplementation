@@ -305,3 +305,32 @@ def param_grad_rzz_ising_field(
         for dU in derivs
     ]
     return jnp.stack(grads)
+
+def compute_1q_zyz_fubini_study_inv(p: jnp.ndarray, meta: dict) -> jnp.ndarray:
+    """
+    Inverse Fubini-Study metric for U = Rz(p0) Ry(p1) Rz(p2).
+    G = 1/4 * [[1, 0, cos(p1)], [0, 1, 0], [cos(p1), 0, 1]]
+    G_inv = 4 / sin^2(p1) * [[1, 0, -cos(p1)], [0, sin^2(p1), 0], [-cos(p1), 0, 1]]
+    """
+    psi = p[1]
+    cos_psi = jnp.cos(psi)
+    sin_psi = jnp.sin(psi)
+    sin2 = sin_psi**2
+    
+    # Damping to avoid singularity
+    eps = 1e-6
+    sin2_damped = jnp.where(jnp.abs(sin2) < eps, eps, sin2)
+    
+    inv_G = 4.0 / sin2_damped * jnp.array([
+        [1.0, 0.0, -cos_psi],
+        [0.0, sin2_damped, 0.0],
+        [-cos_psi, 0.0, 1.0]
+    ])
+    return inv_G
+
+def compute_rzz_fubini_study_inv(p: jnp.ndarray, meta: dict) -> jnp.ndarray:
+    """
+    Inverse Fubini-Study metric for RZZ(theta) = exp(-i theta/2 ZZ).
+    G = 1/4, so G_inv = 4.
+    """
+    return jnp.array(4.0)

@@ -13,7 +13,9 @@ from rqcopt_mpo.optimization.utils import overlap_to_loss
 from rqcopt_mpo.optimization.rzz_ising_optimizer.utils import (
     _rzz_matrix, _drzz_matrix, _compose_k_from_zyz, 
     _paulis_1q, _rot_from_generator, _d_rot_from_generator,
-    _backprop_hst_loss
+    _backprop_hst_loss,
+    compute_1q_zyz_fubini_study_inv,
+    compute_rzz_fubini_study_inv
 )
 
 def _dK_parts(p, dtype):
@@ -156,6 +158,7 @@ def optimize(
         scheduler: Optional[object] = None,
         init_vertical_sweep = "top-down",
         use_ad: bool = False,
+        use_qng: bool = False,
 ):
     new_circ = circ.copy()
     params_tree, meta_tree = extract_params_tree(new_circ)
@@ -179,6 +182,9 @@ def optimize(
         opt.register_param_grad("Ising_hw_1rzz", param_grad_rzz_ising_1rzz)
         opt.register_param_grad("Ising_hw_1q", param_grad_rzz_ising_1q)
 
+    if use_qng:
+        opt.register_metric_inv("Ising_hw_1rzz", compute_rzz_fubini_study_inv)
+        opt.register_metric_inv("Ising_hw_1q", compute_1q_zyz_fubini_study_inv)
 
     history: List[float] = []
     
