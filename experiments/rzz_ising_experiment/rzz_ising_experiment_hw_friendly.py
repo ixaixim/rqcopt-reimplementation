@@ -16,6 +16,7 @@ from rqcopt_mpo.mpo.mpo_dataclass import MPO
 from rqcopt_mpo.circuit.trotter.trotter_ising_hw_friendly import trotterized_ising_hw_friendly_circuit
 from rqcopt_mpo.circuit.rzz_ising_decompose.rzz_circuit_builder_hw_friendly import rzz_decompose_ising_circuit #hw friendly
 from rqcopt_mpo.optimization.rzz_ising_optimizer.rzz_ising_optimizer_hw_friendly import optimize # hw_friendly
+from rqcopt_mpo.optimization.schedulers import ReduceLROnPlateau
 from experiments.utils import save_data_npz, save_experiment_json, get_reference_path
 
 n_sites = 6 # choose even number
@@ -34,7 +35,7 @@ order_ref = 4
 dtype = jnp.complex128
 target_is_normalized = True
 
-max_steps = 10
+max_steps = 100
 lr = 1e-3
 betas = (0.9, 0.999)
 eps = 1e-8
@@ -42,7 +43,7 @@ clip_grad_norm = None
 max_bondim_env = 128
 svd_cutoff = 0.0
 
-patience = 10
+patience = 15
 min_delta = 1e-9
 best_loss = [np.inf]
 stalled_steps = [0]
@@ -107,6 +108,8 @@ print(f"Trotterization of order: {order} and reps: {reps}")
 print(f"New circuit with {new_circ.num_2q_layers} layers")
 # new_circ.print_gates()
 
+scheduler = ReduceLROnPlateau(factor=0.5, patience=5, min_lr=1e-6)
+
 circ, loss = optimize(
     new_circ,
     target_mpo,
@@ -119,6 +122,7 @@ circ, loss = optimize(
     clip_grad_norm=clip_grad_norm,
     use_ad=True,
     callback=early_stop, 
+    scheduler=scheduler,
 )
 
 # add to csv the data, along with the 

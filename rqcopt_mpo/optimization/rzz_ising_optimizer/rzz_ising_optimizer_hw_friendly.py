@@ -153,6 +153,7 @@ def optimize(
         clip_grad_norm: float | None = None,
         bias_correction: bool = True,
         callback: Optional[Callable[..., bool]] = None,
+        scheduler: Optional[object] = None,
         init_vertical_sweep = "top-down",
         use_ad: bool = False,
 ):
@@ -204,6 +205,9 @@ def optimize(
         )
         history.append(loss)
         print(f"Step: {it}, Loss: {loss}")
+
+        if scheduler is not None:
+            scheduler.step(loss, opt)
 
         if callback is not None:
             should_stop = callback(step=it, loss=loss)

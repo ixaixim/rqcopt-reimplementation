@@ -192,3 +192,6 @@ trial.py
 
 experiments/data
 experiments/reference
+
+**/data/**/*.json
+!**/data/**/.gitkeep
