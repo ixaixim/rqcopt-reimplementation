@@ -70,57 +70,45 @@ def rzz_decompose_ising_circuit(orig: Circuit):
                     qc.rzz(-2 * c, 0, 1)
                 qc.append(UnitaryGate(weyl_decomp.K1l), [1])
                 qc.append(UnitaryGate(weyl_decomp.K1r), [0])
-                final_circ = transpile(qc, basis_gates=['rzz', 'u3'], optimization_level=3)
                 # keep in mind Qiskit little endian convention: |q1q0> where the the most relevant bitstring is on the left.
                 #  It will first iterate through q0 (for us is the less significant bit, what would be our q1 instead. And viceversa)
                 # our notation is instead big endian: |q0q1>
-                params_keys = [
-                    "K_L_lower",
-                    "K_L_upper",
-                    "Rzz1",
-                    "middle_lower",
-                    "middle_upper",
-                    "Rzz2",
-                    "K_R_lower",
-                    "K_R_upper",
-                ]
-
-                if len(final_circ.data) != len(params_keys):
-                    raise RuntimeError(
-                        "Expected the decomposed circuit to expose exactly "
-                        f"{len(params_keys)} gates, got {len(final_circ.data)}."
-                    )
-
-                params_dict = {}
+                final_circ = transpile(qc, basis_gates=['rzz', 'u3'], optimization_level=3)
+                
                 params = []
-                for key, instr in zip(params_keys, final_circ.data):
+                meta_list = []
+                for instr in final_circ.data:
                     op = instr.operation
                     qargs = instr.qubits
-                    num_q = op.num_qubits
-                    if num_q not in {1, 2}:
-                        raise ValueError("Unexpected gate with num_qubits != 1 or 2.")
-                    # TODO: might have to reorder how params are saved
-                    params_dict[key] = np.array(op.params)
-                gate.params_dict = params_dict
-                params.extend([
-                    params_dict["K_L_upper"],
-                    params_dict["K_L_lower"],
-                    params_dict["Rzz1"],
-                    params_dict["middle_upper"],
-                    params_dict["middle_lower"],
-                    params_dict["Rzz2"],
-                    params_dict["K_R_upper"],
-                    params_dict["K_R_lower"],
-                ])
+                    # In Qiskit 1.0+, find_bit is the way. 
+                    # But for simplicity, we can assume q.index if it's there
+                    try:
+                        q_indices = [q.index for q in qargs]
+                    except AttributeError:
+                        q_indices = [final_circ.find_bit(q).index for q in qargs]
+                    
+                    params.append(np.array(op.params))
+                    meta_list.append({
+                        "name": op.name,
+                        "qubits": q_indices
+                    })
+
                 gate.params = tuple(params)
-                gate.name = "Ising_field_term"
+                gate.params_dict = {"metadata": meta_list}
+                gate.name = "Ising_synthesized"
+                
+                # Update gate.matrix to exactly match the synthesized parameters
+                from rqcopt_mpo.circuit.noise import update_gate_matrix_from_params
+                update_gate_matrix_from_params(gate, dtype=new_circ.dtype)
 
         if layer.is_odd:
             # store the trotter angle 
             for gate in layer.iterate_gates():
                 angle = rzz_angle(gate.matrix)
-                gate.params = (np.array(angle),)
+                gate.params = (np.array([angle]),)
                 gate.name = "Ising_no_field"
+                from rqcopt_mpo.circuit.noise import update_gate_matrix_from_params
+                update_gate_matrix_from_params(gate, dtype=new_circ.dtype)
     return new_circ
 
 

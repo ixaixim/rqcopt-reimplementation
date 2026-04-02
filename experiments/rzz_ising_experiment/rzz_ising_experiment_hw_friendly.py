@@ -34,7 +34,7 @@ order_ref = 4
 dtype = jnp.complex128
 target_is_normalized = True
 
-max_steps = 10
+max_steps = 50
 lr = 1e-3
 betas = (0.9, 0.999)
 eps = 1e-8
@@ -125,6 +125,9 @@ circ, loss = optimize(
 # lr_tag = f"{lr:.0e}".replace(".", "p")
 # save_data_npz(base_dir, f'loss_hw_friendly_sites{n_sites}_reps_{reps}_lr_{lr_tag}', loss, method='HW_Friendly')
 base_dir = here = Path(__file__).resolve().parent
+
+circuit_filename = f"circuit_hw_friendly_reps_{reps}.json"
+circ.save_json(base_dir / "data" / circuit_filename)
 
 save_experiment_json(
     base_dir=base_dir,

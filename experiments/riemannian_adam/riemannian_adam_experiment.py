@@ -52,7 +52,7 @@ print(f"Loaded target MPO from {target_path}")
 
 # set up quantum circuit
 
-reps = 1
+reps = 3
 dt = t/reps
 order = 2
 
@@ -70,8 +70,8 @@ init_circ = trotterized_xyz_circuit(
 print(f"Initial circuit with {init_circ.num_2q_layers} two-qubit layers")
 
 # Optimization parameters
-max_steps = 10 #debug
-lr = 1e-4
+max_steps = 50 #debug
+lr = 1e-3
 betas = (0.9, 0.999)
 eps = 1e-8
 clip_grad_norm = None
@@ -123,6 +123,9 @@ base_dir = here = Path(__file__).resolve().parent
 
 # Analyze the optimized circuit redundancy
 total_physical_layers = analyze_circuit_weyl_redundancy(circ)
+
+circuit_filename = f"circuit_riemannian_reps_{reps}.json"
+circ.save_json(base_dir / "data" / circuit_filename)
 
 save_experiment_json(
     base_dir=base_dir,
