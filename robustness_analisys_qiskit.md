@@ -42,5 +42,5 @@ Since Hilbert-Schmidt distance for mixed states (Quantum Process Tomography) is 
 *   **Optimization under Coherent Noise:** Injecting stochastic parameter noise during optimization via `jax.vmap`. *Considered secondary* because it only models control noise, not realistic decoherence (amplitude damping), which is the core of the NISQ argument.
 
 ## Verification
-*   Verify that `circuit_to_qiskit` produces a unitary exactly matching the `Circuit.to_matrix()` output in the noiseless limit.
+*   Verify that `cricuit_to_qiskit` produces a unitary exactly matching the `Circuit.to_matrix()` output in the noiseless limit.
 *   Verify that the fidelity of the HF approach degrades slower than the Riemannian approach under the same noise model.

@@ -195,3 +195,5 @@ experiments/reference
 
 **/data/**/*.json
 !**/data/**/.gitkeep
+
+!plots/qiskit_robustness.png

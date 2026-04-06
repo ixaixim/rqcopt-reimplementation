@@ -1,6 +1,6 @@
 import rqcopt_mpo.jax_config  # ensures JAX defaults are consistent
 
-from typing import Tuple, Union, List
+from typing import Tuple, Union, List, Optional
 
 import jax.numpy as jnp
 
@@ -20,7 +20,7 @@ def trotterized_heisenberg_layers(
     method: str = "yoshida",
     dt: float,
     reps: int,
-    dtype: jnp.dtype | None = None,
+    dtype: Optional[jnp.dtype] = None,
 ) -> List[GateLayer]:
     """Return a list of :class:`GateLayer` objects implementing a Suzuki–Trotter
     approximation of *exp(-i·t·H)* for an **even-length** Heisenberg chain.
@@ -191,7 +191,7 @@ def trotterized_heisenberg_circuit(
     method: str = "yoshida",
     dt: float,
     reps: int,
-    dtype: jnp.dtype | None = None,
+    dtype: Optional[jnp.dtype] = None,
 ):
     layers = trotterized_heisenberg_layers(
         n_sites=n_sites, J=J, D=D, h=h,
@@ -218,7 +218,7 @@ def trotterized_xyz_layers(
     method: str = "yoshida",
     dt: float,
     reps: int,
-    dtype: jnp.dtype | None = None,
+    dtype: Optional[jnp.dtype] = None,
 ) -> List[GateLayer]:
     """Return a list of :class:`GateLayer` objects implementing a Suzuki–Trotter
     approximation of *exp(-i·t·H)* for an **even-length** XYZ chain.
@@ -393,7 +393,7 @@ def trotterized_xyz_circuit(
     method: str = "yoshida",
     dt: float,
     reps: int,
-    dtype: jnp.dtype | None = None,
+    dtype: Optional[jnp.dtype] = None,
 ):
     layers = trotterized_xyz_layers(
         n_sites=n_sites, Jx=Jx, Jy=Jy, Jz=Jz,
