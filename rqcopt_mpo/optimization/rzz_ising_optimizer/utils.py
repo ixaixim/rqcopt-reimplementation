@@ -5,7 +5,7 @@ import numpy as np
 from rqcopt_mpo.circuit.circuit_dataclasses import Gate, GateLayer, Circuit
 from rqcopt_mpo.utils.rotations import (
     _backprop_hst_loss,
-    _compose_k_from_zyz,
+    _compose_k_from_zxz,
     _paulis_1q,
     _rot_from_generator,
     _d_rot_from_generator
@@ -89,23 +89,23 @@ def _update_circuit_from_trees(circuit, params_tree, meta_tree) -> None:
                 k_r_u = pieces[6]
                 k_r_l = pieces[7]
 
-                # Reconstruct Matrices: U3(th, ph, lam) -> Rz(ph) Ry(th) Rz(lam)
-                # _compose_k_from_zyz(rz1, ry, rz2)
+                # Reconstruct Matrices: U3(th, ph, lam) -> Rz(ph) Rx(th) Rz(lam)
+                # _compose_k_from_zxz(rz1, rx, rz2)
                 # params are [th, ph, lam]
-                Ku_L = _compose_k_from_zyz(k_l_u[1], k_l_u[0], k_l_u[2], dtype=dtype)
-                Kl_L = _compose_k_from_zyz(k_l_l[1], k_l_l[0], k_l_l[2], dtype=dtype)
+                Ku_L = _compose_k_from_zxz(k_l_u[1], k_l_u[0], k_l_u[2], dtype=dtype)
+                Kl_L = _compose_k_from_zxz(k_l_l[1], k_l_l[0], k_l_l[2], dtype=dtype)
                 K_L = kron(Ku_L, Kl_L)
 
                 RZZ1 = _rzz_matrix(rzz1_ang, dtype=dtype)
 
-                Ku_mid = _compose_k_from_zyz(mid_u[1], mid_u[0], mid_u[2], dtype=dtype)
-                Kl_mid = _compose_k_from_zyz(mid_l[1], mid_l[0], mid_l[2], dtype=dtype)
+                Ku_mid = _compose_k_from_zxz(mid_u[1], mid_u[0], mid_u[2], dtype=dtype)
+                Kl_mid = _compose_k_from_zxz(mid_l[1], mid_l[0], mid_l[2], dtype=dtype)
                 K_mid = kron(Ku_mid, Kl_mid)
 
                 RZZ2 = _rzz_matrix(rzz2_ang, dtype=dtype)
 
-                Ku_R = _compose_k_from_zyz(k_r_u[1], k_r_u[0], k_r_u[2], dtype=dtype)
-                Kl_R = _compose_k_from_zyz(k_r_l[1], k_r_l[0], k_r_l[2], dtype=dtype)
+                Ku_R = _compose_k_from_zxz(k_r_u[1], k_r_u[0], k_r_u[2], dtype=dtype)
+                Kl_R = _compose_k_from_zxz(k_r_l[1], k_r_l[0], k_r_l[2], dtype=dtype)
                 K_R = kron(Ku_R, Kl_R)
 
                 # Combine: K_L @ RZZ1 @ K_mid @ RZZ2 @ K_R
@@ -195,33 +195,33 @@ def param_grad_rzz_ising_field(
     p_krl = theta[17:20]
     
     # Helpers
-    def make_K(p): return _compose_k_from_zyz(p[1], p[0], p[2], dtype=dtype)
+    def make_K(p): return _compose_k_from_zxz(p[1], p[0], p[2], dtype=dtype)
     # _d_rot_from_generator: (angle, G, 0.5, dtype)
-    _, Y, Z, I2 = _paulis_1q(dtype)
+    X, _, Z, I2 = _paulis_1q(dtype)
     
     def dK_parts(p):
         # p = [theta, phi, lam]
-        # K = Rz(phi) Ry(theta) Rz(lam)
+        # K = Rz(phi) Rx(theta) Rz(lam)
         th, ph, lam = p[0], p[1], p[2]
         
         Rz_ph = _rot_from_generator(ph, Z, 0.5, dtype)
-        Ry_th = _rot_from_generator(th, Y, 0.5, dtype)
+        Rx_th = _rot_from_generator(th, X, 0.5, dtype)
         Rz_lam = _rot_from_generator(lam, Z, 0.5, dtype)
         
         dRz_ph = _d_rot_from_generator(ph, Z, 0.5, dtype)
-        dRy_th = _d_rot_from_generator(th, Y, 0.5, dtype)
+        dRx_th = _d_rot_from_generator(th, X, 0.5, dtype)
         dRz_lam = _d_rot_from_generator(lam, Z, 0.5, dtype)
         
         # dK/dth (p[0])
-        dth = Rz_ph @ dRy_th @ Rz_lam
+        dth = Rz_ph @ dRx_th @ Rz_lam
         
         # dK/dph (p[1])
-        dph = dRz_ph @ Ry_th @ Rz_lam
+        dph = dRz_ph @ Rx_th @ Rz_lam
         
         # dK/dlam (p[2])
-        dlam = Rz_ph @ Ry_th @ dRz_lam
+        dlam = Rz_ph @ Rx_th @ dRz_lam
         
-        return [dth, dph, dlam], (Rz_ph @ Ry_th @ Rz_lam)
+        return [dth, dph, dlam], (Rz_ph @ Rx_th @ Rz_lam)
 
     # Build components and derivatives
     dKlu_list, Klu = dK_parts(p_klu)
@@ -309,6 +309,29 @@ def param_grad_rzz_ising_field(
 def compute_1q_zyz_fubini_study_inv(p: jnp.ndarray, meta: dict) -> jnp.ndarray:
     """
     Inverse Fubini-Study metric for U = Rz(p0) Ry(p1) Rz(p2).
+    G = 1/4 * [[1, 0, cos(p1)], [0, 1, 0], [cos(p1), 0, 1]]
+    G_inv = 4 / sin^2(p1) * [[1, 0, -cos(p1)], [0, sin^2(p1), 0], [-cos(p1), 0, 1]]
+    """
+    psi = p[1]
+    cos_psi = jnp.cos(psi)
+    sin_psi = jnp.sin(psi)
+    sin2 = sin_psi**2
+    
+    # Damping to avoid singularity
+    eps = 1e-6
+    sin2_damped = jnp.where(jnp.abs(sin2) < eps, eps, sin2)
+    
+    inv_G = 4.0 / sin2_damped * jnp.array([
+        [1.0, 0.0, -cos_psi],
+        [0.0, sin2_damped, 0.0],
+        [-cos_psi, 0.0, 1.0]
+    ])
+    return inv_G
+
+def compute_1q_zxz_fubini_study_inv(p: jnp.ndarray, meta: dict) -> jnp.ndarray:
+    """
+    Inverse Fubini-Study metric for U = Rz(p0) Rx(p1) Rz(p2).
+    Same as ZYZ case since they are just rotated versions.
     G = 1/4 * [[1, 0, cos(p1)], [0, 1, 0], [cos(p1), 0, 1]]
     G_inv = 4 / sin^2(p1) * [[1, 0, -cos(p1)], [0, sin^2(p1), 0], [-cos(p1), 0, 1]]
     """

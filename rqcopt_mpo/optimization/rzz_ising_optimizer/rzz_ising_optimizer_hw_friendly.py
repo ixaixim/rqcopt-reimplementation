@@ -11,35 +11,35 @@ from rqcopt_mpo.optimization.weyl_optimizer.adam import Adam
 from rqcopt_mpo.utils.pytree import extract_params_tree
 from rqcopt_mpo.optimization.utils import overlap_to_loss
 from rqcopt_mpo.optimization.rzz_ising_optimizer.utils import (
-    _rzz_matrix, _drzz_matrix, _compose_k_from_zyz, 
+    _rzz_matrix, _drzz_matrix, _compose_k_from_zxz, 
     _paulis_1q, _rot_from_generator, _d_rot_from_generator,
     _backprop_hst_loss,
-    compute_1q_zyz_fubini_study_inv,
+    compute_1q_zxz_fubini_study_inv,
     compute_rzz_fubini_study_inv
 )
 
 def _dK_parts(p, dtype):
     """
     Computes K and its derivatives w.r.t parameters [th, psi, ph].
-    K = Rz(th) Ry(psi) Rz(ph).
+    K = Rz(th) Rx(psi) Rz(ph).
     Returns ([dK_dth, dK_dpsi, dK_dph], K_matrix).
     """
     th, psi, ph = p[0], p[1], p[2]
-    _, Y, Z, _ = _paulis_1q(dtype)
+    X, _, Z, _ = _paulis_1q(dtype)
     
     Rz_th = _rot_from_generator(th, Z, 0.5, dtype)
-    Ry_psi = _rot_from_generator(psi, Y, 0.5, dtype)
+    Rx_psi = _rot_from_generator(psi, X, 0.5, dtype)
     Rz_ph = _rot_from_generator(ph, Z, 0.5, dtype)
     
     dRz_th = _d_rot_from_generator(th, Z, 0.5, dtype)
-    dRy_psi = _d_rot_from_generator(psi, Y, 0.5, dtype)
+    dRy_psi = _d_rot_from_generator(psi, X, 0.5, dtype) # Named dRy but it is Rx
     dRz_ph = _d_rot_from_generator(ph, Z, 0.5, dtype)
     
-    K = Rz_th @ Ry_psi @ Rz_ph
+    K = Rz_th @ Rx_psi @ Rz_ph
     
-    d_th = dRz_th @ Ry_psi @ Rz_ph
+    d_th = dRz_th @ Rx_psi @ Rz_ph
     d_psi = Rz_th @ dRy_psi @ Rz_ph
-    d_ph = Rz_th @ Ry_psi @ dRz_ph
+    d_ph = Rz_th @ Rx_psi @ dRz_ph
     
     return [d_th, d_psi, d_ph], K
 
@@ -54,7 +54,7 @@ def param_grad_rzz_ising_1q(
     """
     Gradient for Ising_hw_1q gate.
     Params: 3 (phi, theta, lam).
-    U = Rz(phi) Ry(theta) Rz(lam).
+    U = Rz(phi) Rx(theta) Rz(lam).
     """
     dtype = dL_dG.dtype
     
@@ -138,7 +138,7 @@ def _update_circuit_from_trees_hw(circuit, params_tree, meta_tree):
                 
             elif name == "Ising_hw_1q":
                 p = theta
-                K = _compose_k_from_zyz(p[0], p[1], p[2], dtype=dtype)
+                K = _compose_k_from_zxz(p[0], p[1], p[2], dtype=dtype)
                 gate.matrix = K
                 gate.params = (jnp.asarray(p, dtype=jnp.float64),)
 
@@ -174,7 +174,7 @@ def optimize(
             return _rzz_matrix(t[0], dtype=dtype)
         
         def q1_gen(t):
-            return _compose_k_from_zyz(t[0], t[1], t[2], dtype=dtype)
+            return _compose_k_from_zxz(t[0], t[1], t[2], dtype=dtype)
             
         opt.register_param_grad("Ising_hw_1rzz", opt.make_ad_param_grad(rzz_gen))
         opt.register_param_grad("Ising_hw_1q", opt.make_ad_param_grad(q1_gen))
@@ -184,7 +184,7 @@ def optimize(
 
     if use_qng:
         opt.register_metric_inv("Ising_hw_1rzz", compute_rzz_fubini_study_inv)
-        opt.register_metric_inv("Ising_hw_1q", compute_1q_zyz_fubini_study_inv)
+        opt.register_metric_inv("Ising_hw_1q", compute_1q_zxz_fubini_study_inv)
 
     history: List[float] = []
     

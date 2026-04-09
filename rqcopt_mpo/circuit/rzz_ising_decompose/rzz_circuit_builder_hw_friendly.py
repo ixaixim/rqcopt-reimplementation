@@ -23,17 +23,17 @@ def rzz_angle(U):
 
 def _get_euler_angles(matrix, decomposer):
     """
-    Decompose 2x2 matrix into (th, psi, ph) for Rz(th) @ Ry(psi) @ Rz(ph).
-    Qiskit 'ZYZ' returns (theta, phi, lam) for Rz(phi) Ry(theta) Rz(lam).
+    Decompose 2x2 matrix into (th, psi, ph) for Rz(th) @ Rx(psi) @ Rz(ph).
+    Qiskit 'ZXZ' returns (theta, phi, lam) for Rz(phi) Rx(theta) Rz(lam).
     """
     if matrix is None:
         return np.zeros(3)
     
-    # Qiskit returns (theta, phi, lam) for Rz(phi) Ry(theta) Rz(lam)
+    # Qiskit returns (theta, phi, lam) for Rz(phi) Rx(theta) Rz(lam)
     theta, phi, lam = decomposer.angles(matrix)
     
-    # Map to our convention: Rz(phi) Ry(theta) Rz(lam)
-    # Our function _compose_k_from_zyz(th, psi, ph) does Rz(th) Ry(psi) Rz(ph)
+    # Map to our convention: Rz(phi) Rx(theta) Rz(lam)
+    # Our function _compose_k_from_zxz(th, psi, ph) does Rz(th) Rx(psi) Rz(ph)
     # So: th=phi, psi=theta, ph=lam
     return np.array([phi, theta, lam])
 
@@ -78,7 +78,7 @@ def rzz_decompose_ising_circuit(orig: Circuit, order: int = 2) -> Circuit:
     """
     sorted_layers = sorted(orig.layers, key=lambda layer: layer.layer_index)
     new_layers = []
-    decomposer = OneQubitEulerDecomposer(basis='ZYZ')
+    decomposer = OneQubitEulerDecomposer(basis='ZXZ')
     
     for i, current_layer in enumerate(sorted_layers):
         new_gates = []

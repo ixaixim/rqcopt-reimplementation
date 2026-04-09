@@ -19,7 +19,7 @@ from rqcopt_mpo.optimization.rzz_ising_optimizer.rzz_ising_optimizer_hw_friendly
 from rqcopt_mpo.optimization.schedulers import ReduceLROnPlateau
 from experiments.utils import save_data_npz, save_experiment_json, get_reference_path
 
-n_sites = 6 # choose even number
+n_sites = 20 # choose even number
 J = 0. # HAS TO BE ZERO
 D = 1.
 hx, hz = 0.75, 0.6

@@ -68,6 +68,18 @@ def _compose_k_from_zyz(theta: float, psi: float, phi: float, *, dtype) -> jnp.n
     return Rz1 @ Ry @ Rz2
 
 
+def _compose_k_from_zxz(theta: float, psi: float, phi: float, *, dtype) -> jnp.ndarray:
+    """
+    Return a single-qubit unitary K = Rz(theta) @ Rx(psi) @ Rz(phi),
+    where Rz/Rx use generator scaling 0.5.
+    """
+    X, _, Z, _ = _paulis_1q(dtype)
+    Rz1 = _rot_from_generator(theta, Z, 0.5, dtype)
+    Rx  = _rot_from_generator(psi,   X, 0.5, dtype)
+    Rz2 = _rot_from_generator(phi,   Z, 0.5, dtype)
+    return Rz1 @ Rx @ Rz2
+
+
 def _compose_entangler(a: float, b: float, c: float, *, dtype) -> jnp.ndarray:
     """
     Return the 2-qubit nonlocal unitary V = exp(i (a XX + b YY + c ZZ)).
