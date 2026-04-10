@@ -49,6 +49,39 @@ The code implements different ways of compressing a time evolution quantum circu
 Pytest tests can be found in the pytests/ folder.
 The test/ folder contains instead some older tests, and tests that I want to run on the fly for quick checks.
 
+# Optimization Approaches
+The repository implements two main strategies for circuit compression, demonstrated in the `experiments/` folder.
+
+## Riemannian Adam on SU(4) Gates
+- **Experiment File**: `experiments/riemannian_adam/riemannian_adam_experiment.py`
+- **Optimizer Logic**: `rqcopt_mpo/optimization/riemannian_adam/optimizer.py`
+
+This method treats each 2-qubit gate in a standard brickwall circuit as a point on the Stiefel manifold of 4x4 unitary matrices. It performs gradient descent directly on this manifold.
+
+- **Gradient Calculation**: The Euclidean gradient of the loss function with respect to a gate's matrix is computed using the standard "punching a hole" tensor network contraction.
+- **Riemannian Update**: The optimization follows these steps for each gate:
+  1. The Euclidean gradient is projected onto the tangent space of the manifold at the current gate's matrix.
+  2. An Adam-like update rule determines the step direction and magnitude within the tangent space.
+  3. The new gate matrix is found by "retracting" from the tangent space back onto the manifold.
+- This approach is general and does not assume any specific structure for the 2-qubit gates beyond being unitary.
+
+## Parameter-based Adam on Hardware-Friendly Gates
+- **Experiment File**: `experiments/rzz_ising_experiment/rzz_ising_experiment_hw_friendly.py`
+- **Optimizer Logic**: `rqcopt_mpo/optimization/rzz_ising_optimizer/rzz_ising_optimizer_hw_friendly.py`
+
+This method is tailored for circuits constructed from a specific, hardware-friendly gate set, typically for simulating the Transverse Field Ising Model (TFIM).
+
+- **Ansatz Structure**: The circuit is built from layers of single-qubit rotations and two-qubit RZZ gates. An initial Trotter circuit is decomposed into a fixed structure where gates are parameterized by angles.
+- **Optimization**: The optimization is performed on the scalar parameters (angles) of the gates, not the full gate matrices. A standard Adam optimizer (`rqcopt_mpo/optimization/weyl_optimizer/adam.py`) updates a flat vector containing all circuit parameters.
+- **Gradient Calculation**: The gradient is computed in two stages:
+  1. The Euclidean gradient with respect to the full gate matrix is found via tensor network contraction.
+  2. The chain rule is then applied to obtain the gradient with respect to the underlying parameters. These parameter-gradient functions are registered within the Adam optimizer.
+- **Quantum Natural Gradient (QNG)**: This approach also supports QNG. When enabled, it rescales the parameter gradients by the inverse of the Fubini-Study metric tensor, accounting for the geometry of the parameter space to potentially improve convergence.
+
+# Tests:
+Pytest tests can be found in the pytests/ folder.
+The test/ folder contains instead some older tests, and tests that I want to run on the fly for quick checks.
+
 # Qiskit functions
 In case questions concern Functions that are inherited from Qiskit or Pennylane: read the online documentation for Qiskit and Pennylane.
 

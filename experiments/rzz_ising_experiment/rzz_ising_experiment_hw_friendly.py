@@ -35,7 +35,7 @@ order_ref = 4
 dtype = jnp.complex128
 target_is_normalized = True
 
-max_steps = 10
+max_steps = 100
 lr = 1e-3
 betas = (0.9, 0.999)
 eps = 1e-8
@@ -45,7 +45,7 @@ svd_cutoff = 0.0
 use_qng = True
 
 patience = 15
-min_delta = 1e-9
+min_delta = 1e-8
 best_loss = [np.inf]
 stalled_steps = [0]
 
@@ -80,7 +80,7 @@ target_mpo = MPO.load_json(target_path)
 print(f"Loaded target MPO from {target_path}")
 
 
-reps = 3
+reps = 9
 dt = t/reps
 order = 2
 

@@ -190,8 +190,9 @@ trial.py
 
 .vscode/
 
-experiments/data
-experiments/reference
+# Temporary files:
+# experiments/data
+# experiments/reference
 
-**/data/**/*.json
-!**/data/**/.gitkeep
+# **/data/**/*.json
+# !**/data/**/.gitkeep

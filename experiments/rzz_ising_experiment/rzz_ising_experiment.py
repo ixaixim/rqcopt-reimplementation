@@ -8,7 +8,7 @@ import numpy as np
 # MPO builder and circuits
 from rqcopt_mpo.mpo.mpo_builder import circuit_to_mpo
 from rqcopt_mpo.circuit.trotter.trotter_circuit_builder import trotterized_heisenberg_circuit, trotterized_xyz_circuit
-from rqcopt_mpo.circuit.rzz_ising_decompose.rzz_circuit_builder import rzz_decompose_ising_circuit
+from rqcopt_mpo.circuit.rzz_ising_decompose.rzz_circuit_builder import rzz_decompose_ising_circuit_fixed_params as rzz_decompose_ising_circuit
 from rqcopt_mpo.optimization.rzz_ising_optimizer.rzz_ising_optimizer import optimize
 from rqcopt_mpo.optimization.utils import overlap_to_loss
 from rqcopt_mpo.optimization.adam_utils import make_early_stop
@@ -16,7 +16,7 @@ from rqcopt_mpo.optimization.adam_utils import make_early_stop
 from experiments.utils import save_data_npz
 
 # trotterization params
-n_sites = 10 # choose even number
+n_sites = 6 # choose even number
 J = 0. # HAS TO BE ZERO
 D = 1.
 h = 0.75

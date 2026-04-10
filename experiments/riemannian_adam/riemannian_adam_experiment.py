@@ -52,7 +52,7 @@ print(f"Loaded target MPO from {target_path}")
 
 # set up quantum circuit
 
-reps = 1
+reps = 3
 dt = t/reps
 order = 2
 
@@ -70,8 +70,8 @@ init_circ = trotterized_xyz_circuit(
 print(f"Initial circuit with {init_circ.num_2q_layers} two-qubit layers")
 
 # Optimization parameters
-max_steps = 10 #debug
-lr = 1e-4
+max_steps = 100 #debug
+lr = 1e-3
 betas = (0.9, 0.999)
 eps = 1e-8
 clip_grad_norm = None

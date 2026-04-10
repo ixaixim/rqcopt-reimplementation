@@ -330,11 +330,13 @@ class Circuit:
         def _restore_params_list(raw):
             if raw is None:
                 return ()
+            if isinstance(raw, list):
+                # We expect raw to be a list of parameter blocks (e.g., from to_dict)
+                return tuple(_restore_param(v) for v in raw)
+            
             restored = _restore_param(raw)
             if isinstance(restored, tuple):
                 return restored
-            if isinstance(restored, list):
-                return tuple(restored)
             return (restored,)
 
         layers: List[GateLayer] = []
