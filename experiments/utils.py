@@ -194,6 +194,16 @@ def get_reference_path(
     return ref_dir / name
 
 
+def save_circuit(circuit: Circuit, path: str | Path):
+    """Save a Circuit object to a JSON file."""
+    circuit.save_json(path)
+
+
+def load_circuit(path: str | Path) -> Circuit:
+    """Load a Circuit object from a JSON file."""
+    return Circuit.load_json(path)
+
+
 def save_experiment_json(
     base_dir: Path,
     method: str,
@@ -207,6 +217,7 @@ def save_experiment_json(
 ):
     """
     Save experiment results and metadata to a timestamped JSON file.
+    Includes the full circuit data.
     """
     import datetime
 
@@ -233,6 +244,7 @@ def save_experiment_json(
     payload = {
         "method": method,
         "final_loss": _serializable(final_loss),
+        "circuit": circuit.to_dict(),
         "num_2q_layers": circuit.num_2q_layers,
         "hamiltonian_params": _serializable(hamiltonian_params),
         "trotter_params": _serializable(trotter_params),
@@ -248,6 +260,21 @@ def save_experiment_json(
         json.dump(payload, f, indent=4)
 
     print(f"Saved experiment results to {filepath}")
+
+
+def load_experiment_json(filepath: str | Path) -> dict[str, Any]:
+    """
+    Load experiment results from a JSON file.
+    Reconstructs the Circuit object if it is present in the data.
+    """
+    path = Path(filepath)
+    with path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    
+    if "circuit" in data and data["circuit"] is not None:
+        data["circuit"] = Circuit.from_dict(data["circuit"])
+    
+    return data
 
 
 def load_all_npz(data_dir: Path):
