@@ -1,8 +1,0 @@
-wire trotterized xyz heisenberg hamiltonian in the run.py
-
-Optimization
-wire optimization early stop parameters into adam_utils.py and 
-include them into configs and run.py
-
-# have a look at the full KAK decomposition: 
-for self implementation: https://github.com/qiskit-advocate/qamp-spring-23/issues/33 or here: https://github.com/mpham26uchicago/laughing-umbrella/blob/main/background/Full%20Two%20Qubit%20KAK%20Implementation.ipynb
